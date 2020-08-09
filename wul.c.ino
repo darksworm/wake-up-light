@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <LiquidCrystal.h>
 #include "RTClib.h"
 
 const int relay2 = 9;
@@ -14,9 +15,18 @@ const int hour_start = 7;
 const int hour_full = 8;
 const int hour_end = 9;
 
+const int lcd_enable = A0;
+const int lcd_d4 = A1;
+const int lcd_d5 = A2;
+const int lcd_d6 = A3;
+const int lcd_d7 = A4;
+const int lcd_rs = A5;
+const int lcd_backlight = 7;
+
 const int steps_between = hour_full - hour_start + 1 * 60;
 
 RTC_DS3231 rtc;
+LiquidCrystal lcd(lcd_rs, lcd_enable, lcd_d4, lcd_d5, lcd_d6, lcd_d7);
 
 int prev_timeframe_toggle_button_state = LOW;
 int prev_override_button_state = LOW;
@@ -35,6 +45,8 @@ void setup ()
   pinMode(low1, OUTPUT);
   pinMode(relay, OUTPUT);
   pinMode(relay2, OUTPUT);
+  pinMode(lcd_backlight, OUTPUT);
+
   pinMode(timeframe_toggle_button, INPUT);
 
   analogWrite(led, 0);
@@ -45,6 +57,8 @@ void setup ()
   analogWrite(relay, 0);
   analogWrite(relay2, 0);
 
+  lcd.begin(16,2);
+  
   if (!rtc.begin()) {
     while(1) {
       analogWrite(led, 255);
@@ -73,8 +87,20 @@ void setup ()
   Serial.println("end of setup");
 }
 
+void turn_on_lcd()
+{
+  digitalWrite(7, HIGH);
+  lcd.display();
+}
+
+void turn_off_lcd()
+{
+  digitalWrite(7, LOW);
+  lcd.noDisplay();
+}
+
 void loop () 
-{  
+{   
     DateTime now = rtc.now();
 
     const unsigned int day = now.day();
