@@ -1,102 +1,136 @@
 #include <Wire.h>
 #include <LiquidCrystal.h>
 #include "RTClib.h"
+#include <EEPROM.h>
 
-const int relay2 = 9;
-const int relay = 10;
-const int timeframe_toggle_button = 11;
-const int override_button = 12;
-const int high1 = 4;
-const int low2 = 6;
-const int low1 = 5;
-const int led = 13;
+#define LCD_ENABLE A0
+#define LCD_D4 A1
+#define LCD_D5 A2
+#define LCD_D6 A3
+#define LCD_D7 A4
+#define LCD_RS A5
+#define LCD_BACKLIGHT 7
 
-const int hour_start = 7;
-const int hour_full = 8;
-const int hour_end = 9;
+#define BTN_BLUE 11
+#define BTN_RED 12
+#define BTN_WHITE 8
+#define BTN_GREEN 13
+#define BTN_COUNT 4
 
-const int lcd_enable = A0;
-const int lcd_d4 = A1;
-const int lcd_d5 = A2;
-const int lcd_d6 = A3;
-const int lcd_d7 = A4;
-const int lcd_rs = A5;
-const int lcd_backlight = 7;
+#define RELAY2 9
+#define RELAY 10
+#define HIGH1 4
+#define LOW2 6
+#define LOW1 5
 
-const int steps_between = hour_full - hour_start + 1 * 60;
+#define HOUR_START 7
+#define HOUR_FULL 8
+#define HOUR_END 9
+#define DEBOUNCE_DELAY 200
+
+void turn_on_lcd();
+void turn_off_lcd();
+
+bool button_state_changed(int);
+bool button_is(int, int);
+
+enum class ClockState
+{
+    DISABLED,
+    ACTIVE_TIMER,
+    LIGHTS_ON,
+    VARIABLE_SELECTION,
+    CHANGING_VARIABLE
+};
+
+enum class ClockVariable
+{
+    DISABLE_CLOCK,
+    START_TIME,
+    RAMP_UP_TIME,
+    END_TIME
+};
+
+enum Button {
+    BLUE = 0,
+    RED = 1,
+    WHITE = 2,
+    GREEN = 3
+};
+
+struct State {
+    ClockState current_clock_state = ClockState::ACTIVE_TIMER;
+    ClockVariable current_clock_variable = ClockVariable::DISABLE_CLOCK;
+
+    int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
+    int curr_button_state[BTN_COUNT] = {0, 0, 0, 0};
+    int last_debounce_start = millis();
+};
+
+const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
+
+int skip_day = -1;
+bool turn_lights_on = false;
+
+const int steps_between = HOUR_FULL - HOUR_START + 1 * 60;
 
 RTC_DS3231 rtc;
-LiquidCrystal lcd(lcd_rs, lcd_enable, lcd_d4, lcd_d5, lcd_d6, lcd_d7);
-
-int prev_timeframe_toggle_button_state = LOW;
-int prev_override_button_state = LOW;
-int skipDay = -1;
-bool turn_lights_on = false;
+LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+State state;
 
 void setup () 
 {
-  delay(700);
-  Serial.begin(9600);
-  delay(700);
-  
-  pinMode(led, OUTPUT);
-  pinMode(high1, OUTPUT);
-  pinMode(low2, OUTPUT);
-  pinMode(low1, OUTPUT);
-  pinMode(relay, OUTPUT);
-  pinMode(relay2, OUTPUT);
-  pinMode(lcd_backlight, OUTPUT);
+    delay(700);
+    Serial.begin(9600);
+    delay(700);
 
-  pinMode(timeframe_toggle_button, INPUT);
+    pinMode(HIGH1, OUTPUT);
+    pinMode(LOW2, OUTPUT);
+    pinMode(LOW1, OUTPUT);
+    pinMode(RELAY, OUTPUT);
+    pinMode(RELAY2, OUTPUT);
+    pinMode(LCD_BACKLIGHT, OUTPUT);
 
-  analogWrite(led, 0);
-  analogWrite(high1, 0);
-  analogWrite(low2, 0);
-  analogWrite(low1, 0);
-  
-  analogWrite(relay, 0);
-  analogWrite(relay2, 0);
-
-  lcd.begin(16,2);
-  
-  if (!rtc.begin()) {
-    while(1) {
-      analogWrite(led, 255);
-      delay(750);
-      analogWrite(led, 128);
-      delay(750);
-      analogWrite(led, 0);
-      delay(750);
+    for (int i = 0; i < BTN_COUNT; i++) {
+        pinMode(buttons[i], INPUT);
     }
-  }
 
-  if (rtc.lostPower()) {
-     while(1) {
-      analogWrite(led, 0);
-      delay(750);
-      analogWrite(led, 64);
-      delay(750);
-      analogWrite(led, 128);
-      delay(750);
+    analogWrite(HIGH1, 0);
+    analogWrite(LOW2, 0);
+    analogWrite(LOW1, 0);
+
+    analogWrite(RELAY, 0);
+    analogWrite(RELAY2, 0);
+
+    lcd.begin(16,2);
+
+    if (!rtc.begin()) {
+        while(1) {
+            analogWrite(LED_BUILTIN, 255);
+            delay(750);
+            analogWrite(LED_BUILTIN, 128);
+            delay(750);
+            analogWrite(LED_BUILTIN, 0);
+            delay(750);
+        }
     }
-  }
 
-  // Following line sets the RTC to the date & time this sketch was compiled
-  //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    if (rtc.lostPower()) {
+        while(1) {
+            analogWrite(LED_BUILTIN, 0);
+            delay(750);
+            analogWrite(LED_BUILTIN, 64);
+            delay(750);
+            analogWrite(LED_BUILTIN, 128);
+            delay(750);
+        }
+    }
 
-  Serial.println("end of setup");
-}
-
-void turn_on_lcd()
-{
-  digitalWrite(7, HIGH);
-  lcd.display();
-}
-
-void turn_off_lcd()
-{
-  digitalWrite(7, LOW);
-  lcd.noDisplay();
+    // Following line sets the RTC to the date & time this sketch was compiled
+   // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    
+    turn_on_lcd();
+    lcd.write("hello, world!");
 }
 
 void loop () 
@@ -106,71 +140,102 @@ void loop ()
     const unsigned int day = now.day();
     const unsigned int hour = now.hour();
     const unsigned int minute = now.minute();
+    const unsigned int ms = millis();
 
-    int timeframe_toggle_button_state = digitalRead(timeframe_toggle_button);
-    int override_button_state = digitalRead(override_button);
+    bool is_in_timeframe = hour >= HOUR_START && hour < HOUR_END;
 
-    bool isInTimeframe = hour >= hour_start && hour < hour_end;
+    if((ms - state.last_debounce_start) > DEBOUNCE_DELAY)
+    {
+        bool debounce = false;
 
-    if (isInTimeframe && prev_timeframe_toggle_button_state != timeframe_toggle_button_state) {
-        if(timeframe_toggle_button_state == HIGH) {
-           skipDay = skipDay == day ? -1 : day;
+        for (int i = 0; i < BTN_COUNT; i++) {
+            state.curr_button_state[i] = digitalRead(buttons[i]);
         }
-        
-        prev_timeframe_toggle_button_state = timeframe_toggle_button_state;
-        delay(50); //debounce
+
+        if (is_in_timeframe && button_state_changed(Button::BLUE)) {
+            if(button_is(Button::BLUE, HIGH)) {
+                skip_day = skip_day == day ? -1 : day;
+            }
+            debounce = true;
+        }
+
+        if (button_is(Button::RED, HIGH) && button_state_changed(Button::RED)) {
+            turn_lights_on = !turn_lights_on;
+            debounce = true;
+        }
+
+        for (int i = 0; i < BTN_COUNT; i++) {
+            state.prev_button_state[i] = state.curr_button_state[i];    
+        }
+
+        if (debounce) {
+            state.last_debounce_start = ms;
+        }
     }
-    
-    if (override_button_state == HIGH && prev_override_button_state != HIGH) {
-        turn_lights_on = !turn_lights_on;
-        delay(50); //debounce
-    }
-    
-    prev_override_button_state = override_button_state;
 
     if (turn_lights_on) {
-        digitalWrite(relay, LOW);
-        digitalWrite(relay2, LOW);
-        
-        analogWrite(low1,255);
-        analogWrite(high1, 255);
-        analogWrite(low2, 255);
-          
+        digitalWrite(RELAY, LOW);
+        digitalWrite(RELAY2, LOW);
+
+        analogWrite(LOW1,255);
+        analogWrite(HIGH1, 255);
+        analogWrite(LOW2, 255);
+
         return;
     }
 
-    const unsigned int current_step = minute + (hour - hour_start) * 60;
-      
-    if (isInTimeframe && skipDay != day) {
-       digitalWrite(relay, LOW);
-       digitalWrite(relay2, LOW);
+    const unsigned int current_step = minute + (hour - HOUR_START) * 60;
 
-       if (hour_full <= hour) {
-          analogWrite(low1,255);
-          analogWrite(high1, 255);
-          analogWrite(low2, 255);
-          
-          return;
-       }
+    if (is_in_timeframe && skip_day != day) {
+        digitalWrite(RELAY, LOW);
+        digitalWrite(RELAY2, LOW);
 
-       const int step_interval = steps_between / 2;
+        if (HOUR_FULL <= hour) {
+            analogWrite(LOW1,255);
+            analogWrite(HIGH1, 255);
+            analogWrite(LOW2, 255);
 
-       if (current_step < step_interval) {
-          analogWrite(low1, (float)current_step / step_interval * 255);
-          return;
-       }
+            return;
+        }
 
-       if (current_step >= step_interval) {
-          analogWrite(low1, 255);
-          analogWrite(low2, (float)(current_step - step_interval) / step_interval * 255);
-          return;
-       }       
+        const int step_interval = steps_between / 2;
+
+        if (current_step < step_interval) {
+            analogWrite(LOW1, (float)current_step / step_interval * 255);
+            return;
+        }
+
+        if (current_step >= step_interval) {
+            analogWrite(LOW1, 255);
+            analogWrite(LOW2, (float)(current_step - step_interval) / step_interval * 255);
+            return;
+        }       
     } else {
-       digitalWrite(relay, HIGH);
-       digitalWrite(relay2, HIGH);
-       
-       analogWrite(high1, 0);
-       analogWrite(low2, 0);
-       analogWrite(low1, 0);
+        digitalWrite(RELAY, HIGH);
+        digitalWrite(RELAY2, HIGH);
+
+        analogWrite(HIGH1, 0);
+        analogWrite(LOW2, 0);
+        analogWrite(LOW1, 0);
     }    
+}
+
+void turn_on_lcd()
+{
+    digitalWrite(7, HIGH);
+    lcd.display();
+}
+
+void turn_off_lcd()
+{
+    digitalWrite(7, LOW);
+    lcd.noDisplay();
+}
+
+bool button_state_changed(int btn) {
+    return state.prev_button_state[btn] != state.curr_button_state[btn];
+}
+
+bool button_is(int btn, int val) {
+    return state.curr_button_state[btn] == val;
 }
