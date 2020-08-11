@@ -58,26 +58,42 @@ enum Button {
 const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
 
 struct State {
+    // current clock state
     ClockState current_clock_state = ClockState::ACTIVE_TIMER;
+    // previous clock state (used when exiting temporary states)
     ClockState prev_clock_state = ClockState::ACTIVE_TIMER;
+
+    // current variable displayed on lcd
     ClockVariable current_clock_variable = ClockVariable::DISABLE_CLOCK;
 
     // calendar number of day to skip
     int skip_day = -1;
 
+    // previous button states (used for checking whether a change happened)
     int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
+    // current button states
     int curr_button_state[BTN_COUNT] = {0, 0, 0, 0};
+    // when the last debounce happened in ms (used for debounce timer)
     int last_debounce_start = millis();
 
+    // when the lights should start ramping up in minutes (7:20 AM = 7 * 60 + 20)
     int start_time_minutes;
+    // for how long the lights should be ramping up to 100% for in minutes
     int ramp_up_duration_minutes;
+    // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
     int end_time_minutes;
 };
 
+// Indermediary state variable representation in the EEPROM
+// This is a separate struct, because the data is stored differently
+// in the EEPROM than used in the state.
 struct EEPROMState {
+    // minutes are stored in the EEPROM divided by 10, so that one days minutes
+    // fit in to a single byte. (1440 mins = 144, which is < 255)
     int start_time_minutes;
     int ramp_up_duration_minutes;
     int end_time_minutes;
+
     int clock_enabled;
 };
 
@@ -298,7 +314,8 @@ void read_state_from_eeprom()
     state.start_time_minutes = eeprom_state.start_time_minutes * 10;
     state.ramp_up_duration_minutes = eeprom_state.ramp_up_duration_minutes * 10;
     state.end_time_minutes = eeprom_state.end_time_minutes * 10;
-    state.current_clock_state = eeprom_state.clock_enabled ? ClockState::ACTIVE_TIMER : ClockState::DISABLED;
+    state.current_clock_state = eeprom_state.clock_enabled ?
+        ClockState::ACTIVE_TIMER : ClockState::DISABLED;
 }
 
 void write_state_to_eeprom()
