@@ -22,15 +22,14 @@
 #define LOW2 6
 #define LOW1 5
 
-#define HOUR_START 7
-#define HOUR_FULL 8
-#define HOUR_END 9
 #define DEBOUNCE_DELAY 200
 
 #define ENABLED_ADDR 0
 #define START_MINUTES_ADDR 1
 #define RAMP_UP_DURATION_MINUTES_ADDR 2
 #define END_MINUTES_ADDR 3
+
+#define MAGIC_NUMBER 137
 
 enum class ClockState
 {
@@ -60,7 +59,11 @@ const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
 
 struct State {
     ClockState current_clock_state = ClockState::ACTIVE_TIMER;
+    ClockState prev_clock_state = ClockState::ACTIVE_TIMER;
     ClockVariable current_clock_variable = ClockVariable::DISABLE_CLOCK;
+
+    // calendar number of day to skip
+    int skip_day = -1;
 
     int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
     int curr_button_state[BTN_COUNT] = {0, 0, 0, 0};
@@ -78,10 +81,11 @@ struct EEPROMState {
     int clock_enabled;
 };
 
-RTC_DS3231 rtc;
-LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 State state;
 EEPROMState eeprom_state;
+
+RTC_DS3231 rtc;
+LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
 const int eeprom_addrs[] = {
     ENABLED_ADDR,
@@ -104,11 +108,11 @@ int eeprom_default_state_vals[] = {
     9 * 6  // end at 9AM (minutes/10)
 };
 
-int skip_day = -1;
-bool turn_lights_on = false;
-
 void turn_on_lcd();
 void turn_off_lcd();
+
+void turn_all_lights_on();
+void turn_all_lights_off();
 
 bool button_state_changed(int);
 bool button_is(int, int);
@@ -159,7 +163,7 @@ void setup ()
 
         while(1);
     }
-    
+
     // Following line sets the RTC to the date & time this sketch was compiled
     // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
@@ -188,13 +192,20 @@ void loop ()
 
         if (is_in_timeframe && button_state_changed(Button::BLUE)) {
             if(button_is(Button::BLUE, HIGH)) {
-                skip_day = skip_day == day ? -1 : day;
+                state.skip_day = state.skip_day == day ? -1 : day;
             }
+
             debounce = true;
         }
 
         if (button_is(Button::RED, HIGH) && button_state_changed(Button::RED)) {
-            turn_lights_on = !turn_lights_on;
+            if (state.current_clock_state != ClockState::LIGHTS_ON) {
+                state.prev_clock_state = state.current_clock_state;
+                state.current_clock_state = ClockState::LIGHTS_ON;
+            } else {
+                state.current_clock_state = state.prev_clock_state;
+            }
+
             debounce = true;
         }
 
@@ -207,21 +218,21 @@ void loop ()
         }
     }
 
-    if (turn_lights_on) {
-        digitalWrite(RELAY, LOW);
-        digitalWrite(RELAY2, LOW);
-
-        analogWrite(LOW1,255);
-        analogWrite(HIGH1, 255);
-        analogWrite(LOW2, 255);
-
+    if (state.current_clock_state == ClockState::LIGHTS_ON) {
+        turn_all_lights_on();
         return;
     }
 
-    const int steps_between = state.ramp_up_duration_minutes;
-    const int current_step = curr_mins - state.start_time_minutes;
+    if (state.skip_day == day || !is_in_timeframe) {
+        turn_all_lights_off();
+        return;
+    }
 
-    if (is_in_timeframe && skip_day != day) {
+    // LED ramp-up
+    {
+        const int steps_between = state.ramp_up_duration_minutes;
+        const int current_step = curr_mins - state.start_time_minutes;
+
         digitalWrite(RELAY, LOW);
         digitalWrite(RELAY2, LOW);
 
@@ -230,32 +241,43 @@ void loop ()
         if (current_step < step_interval) {
             analogWrite(LOW1, (float)current_step / step_interval * 255);
         } else if (current_step >= steps_between) {
-            analogWrite(LOW1,255);
-            analogWrite(HIGH1, 255);
-            analogWrite(LOW2, 255);
+            turn_all_lights_on();
         } else if (current_step >= step_interval) {
             analogWrite(LOW1, 255);
             analogWrite(LOW2, (float)(current_step - step_interval) / step_interval * 255);
         }      
-    } else {
-        digitalWrite(RELAY, HIGH);
-        digitalWrite(RELAY2, HIGH);
+    }
+}
 
-        analogWrite(HIGH1, 0);
-        analogWrite(LOW2, 0);
-        analogWrite(LOW1, 0);
-    }    
+void turn_all_lights_on()
+{
+    digitalWrite(RELAY, LOW);
+    digitalWrite(RELAY2, LOW);
+
+    analogWrite(LOW1,255);
+    analogWrite(HIGH1, 255);
+    analogWrite(LOW2, 255);
+}
+
+void turn_all_lights_off()
+{
+    digitalWrite(RELAY, HIGH);
+    digitalWrite(RELAY2, HIGH);
+
+    analogWrite(HIGH1, 0);
+    analogWrite(LOW2, 0);
+    analogWrite(LOW1, 0);
 }
 
 void turn_on_lcd()
 {
-    digitalWrite(7, HIGH);
+    digitalWrite(LCD_BACKLIGHT, HIGH);
     lcd.display();
 }
 
 void turn_off_lcd()
 {
-    digitalWrite(7, LOW);
+    digitalWrite(LCD_BACKLIGHT, LOW);
     lcd.noDisplay();
 }
 
@@ -297,10 +319,10 @@ void initialize_default_state_to_eeprom()
         EEPROM.write(eeprom_addrs[i], eeprom_default_state_vals[i]);
     }
 
-    EEPROM.write(EEPROM.length() - 1, 137);
+    EEPROM.write(EEPROM.length() - 1, MAGIC_NUMBER);
 }
 
 bool eeprom_is_initialized()
 {
-    return EEPROM.read(EEPROM.length() - 1) == 137;
+    return EEPROM.read(EEPROM.length() - 1) == MAGIC_NUMBER;
 }
