@@ -14,10 +14,9 @@
 #define BTN_BLUE 11
 #define BTN_RED 12
 #define BTN_WHITE 10
-#define BTN_GREEN 13
-#define BTN_COUNT 4
-
-#define RELAY2 9
+#define BTN_GREEN 13 
+#define BTN_COUNT 4 
+#define RELAY2 9 
 #define RELAY 8
 #define HIGH1 4
 #define LOW2 6
@@ -70,12 +69,19 @@ struct State {
     int start_time_minutes;
     int ramp_up_duration_minutes;
     int end_time_minutes;
-    int clock_enabled_temp;
+};
+
+struct EEPROMState {
+    int start_time_minutes;
+    int ramp_up_duration_minutes;
+    int end_time_minutes;
+    int clock_enabled;
 };
 
 RTC_DS3231 rtc;
 LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 State state;
+EEPROMState eeprom_state;
 
 const int eeprom_addrs[] = {
     ENABLED_ADDR,
@@ -85,23 +91,21 @@ const int eeprom_addrs[] = {
 };
 
 int* eeprom_state_variables[] = {
-    &state.clock_enabled_temp,
-    &state.start_time_minutes,
-    &state.ramp_up_duration_minutes,
-    &state.end_time_minutes
+    &eeprom_state.clock_enabled,
+    &eeprom_state.start_time_minutes,
+    &eeprom_state.ramp_up_duration_minutes,
+    &eeprom_state.end_time_minutes
 };
 
 int eeprom_default_state_vals[] = { 
-    1,      // enabled
-    7 * 60, // start at 7AM
-    60,     // ramp for 1hr
-    9 * 60  // end at 9AM
+    1,     // enabled
+    7 * 6, // start at 7AM (minutes/10)
+    6,     // ramp for 1hr (minutes/10)
+    9 * 6  // end at 9AM (minutes/10)
 };
 
 int skip_day = -1;
 bool turn_lights_on = false;
-
-const int steps_between = HOUR_FULL - HOUR_START + 1 * 60;
 
 void turn_on_lcd();
 void turn_off_lcd();
@@ -113,6 +117,8 @@ void read_state_from_eeprom(State &state);
 void write_state_to_eeprom(State &state);
 void initialize_default_state_to_eeprom();
 bool eeprom_is_initialized();
+void clock_state_to_eeprom_state();
+void eeprom_state_to_clock_state();
 
 void setup () 
 {
@@ -122,7 +128,7 @@ void setup ()
         initialize_default_state_to_eeprom();
     }
 
-    read_state_from_eeprom(state);
+    read_state_from_eeprom();
 
     int outputs[] = {HIGH1, LOW2, LOW1, RELAY, RELAY2, LCD_BACKLIGHT};
     int lowOutputs[] = {HIGH1, LOW2, LOW1, RELAY, RELAY2};
@@ -155,9 +161,9 @@ void setup ()
 
         while(1);
     }
-
+    
     // Following line sets the RTC to the date & time this sketch was compiled
-   // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
 
 void loop () 
@@ -169,7 +175,10 @@ void loop ()
     const unsigned int minute = now.minute();
     const unsigned int ms = millis();
 
-    bool is_in_timeframe = hour >= HOUR_START && hour < HOUR_END;
+    const unsigned curr_mins = hour * 60 + minute;
+
+    bool is_in_timeframe = curr_mins >= state.start_time_minutes 
+        && curr_mins < state.end_time_minutes;
 
     if((ms - state.last_debounce_start) > DEBOUNCE_DELAY)
     {
@@ -211,32 +220,25 @@ void loop ()
         return;
     }
 
-    const unsigned int current_step = minute + (hour - HOUR_START) * 60;
+    const int steps_between = state.ramp_up_duration_minutes;
+    const int current_step = curr_mins - state.start_time_minutes;
 
     if (is_in_timeframe && skip_day != day) {
         digitalWrite(RELAY, LOW);
         digitalWrite(RELAY2, LOW);
 
-        if (HOUR_FULL <= hour) {
-            analogWrite(LOW1,255);
-            analogWrite(HIGH1, 255);
-            analogWrite(LOW2, 255);
-
-            return;
-        }
-
         const int step_interval = steps_between / 2;
 
         if (current_step < step_interval) {
             analogWrite(LOW1, (float)current_step / step_interval * 255);
-            return;
-        }
-
-        if (current_step >= step_interval) {
+        } else if (current_step >= steps_between) {
+            analogWrite(LOW1,255);
+            analogWrite(HIGH1, 255);
+            analogWrite(LOW2, 255);
+        } else if (current_step >= step_interval) {
             analogWrite(LOW1, 255);
             analogWrite(LOW2, (float)(current_step - step_interval) / step_interval * 255);
-            return;
-        }       
+        }      
     } else {
         digitalWrite(RELAY, HIGH);
         digitalWrite(RELAY2, HIGH);
@@ -267,19 +269,24 @@ bool button_is(int btn, int val) {
     return state.curr_button_state[btn] == val;
 }
 
-void read_state_from_eeprom(State& state) 
+void read_state_from_eeprom() 
 {
     for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
         *eeprom_state_variables[i] = EEPROM.read(eeprom_addrs[i]);
     }
 
-    state.current_clock_state = state.clock_enabled_temp ? 
-        ClockState::ACTIVE_TIMER : ClockState::DISABLED;
+    state.start_time_minutes = eeprom_state.start_time_minutes * 10;
+    state.ramp_up_duration_minutes = eeprom_state.ramp_up_duration_minutes * 10;
+    state.end_time_minutes = eeprom_state.end_time_minutes * 10;
+    state.current_clock_state = eeprom_state.clock_enabled ? ClockState::ACTIVE_TIMER : ClockState::DISABLED;
 }
 
-void write_state_to_eeprom(State& state)
+void write_state_to_eeprom()
 {
-    state.clock_enabled_temp = state.current_clock_state == ClockState::DISABLED;
+    eeprom_state.start_time_minutes = state.start_time_minutes / 10;
+    eeprom_state.ramp_up_duration_minutes = state.ramp_up_duration_minutes / 10;
+    eeprom_state.end_time_minutes = state.end_time_minutes / 10;
+    eeprom_state.clock_enabled = state.current_clock_state != ClockState::DISABLED;
 
     for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
         EEPROM.write(eeprom_addrs[i], *eeprom_state_variables[i]);
