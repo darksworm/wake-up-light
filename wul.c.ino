@@ -117,8 +117,6 @@ void read_state_from_eeprom(State &state);
 void write_state_to_eeprom(State &state);
 void initialize_default_state_to_eeprom();
 bool eeprom_is_initialized();
-void clock_state_to_eeprom_state();
-void eeprom_state_to_clock_state();
 
 void setup () 
 {
