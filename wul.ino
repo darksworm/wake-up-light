@@ -1,101 +1,22 @@
 #include <Wire.h>
 #include <LiquidCrystal.h>
-#include "RTClib.h"
 #include <EEPROM.h>
+#include "RTClib.h"
+#include "definitions.h"
 
-#define LCD_ENABLE A1
-#define LCD_D4 A2
-#define LCD_D5 A3
-#define LCD_D6 A4
-#define LCD_D7 A5
-#define LCD_RS A0
-#define LCD_BACKLIGHT 7
+void turn_on_lcd();
+void turn_off_lcd();
 
-#define BTN_BLUE 11
-#define BTN_RED 12
-#define BTN_WHITE 10
-#define BTN_GREEN 13 
-#define BTN_COUNT 4 
-#define RELAY2 9 
-#define RELAY 8
-#define HIGH1 4
-#define LOW2 6
-#define LOW1 5
+void turn_all_lights_on();
+void turn_all_lights_off();
 
-#define DEBOUNCE_DELAY 200
+bool button_state_changed(int);
+bool button_is(int, int);
 
-#define ENABLED_ADDR 0
-#define START_MINUTES_ADDR 1
-#define RAMP_UP_DURATION_MINUTES_ADDR 2
-#define END_MINUTES_ADDR 3
-
-#define MAGIC_NUMBER 137
-
-enum class ClockState
-{
-    DISABLED,
-    ACTIVE_TIMER,
-    LIGHTS_ON,
-    VARIABLE_SELECTION,
-    CHANGING_VARIABLE
-};
-
-enum class ClockVariable
-{
-    DISABLE_CLOCK,
-    START_TIME,
-    RAMP_UP_TIME,
-    END_TIME
-};
-
-enum Button {
-    BLUE = 0,
-    RED = 1,
-    WHITE = 2,
-    GREEN = 3
-};
-
-const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
-
-struct State {
-    // current clock state
-    ClockState current_clock_state = ClockState::ACTIVE_TIMER;
-    // previous clock state (used when exiting temporary states)
-    ClockState prev_clock_state = ClockState::ACTIVE_TIMER;
-
-    // current variable displayed on lcd
-    ClockVariable current_clock_variable = ClockVariable::DISABLE_CLOCK;
-
-    // calendar number of day to skip
-    int skip_day = -1;
-
-    // previous button states (used for checking whether a change happened)
-    int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
-    // current button states
-    int curr_button_state[BTN_COUNT] = {0, 0, 0, 0};
-    // when the last debounce happened in ms (used for debounce timer)
-    int last_debounce_start = millis();
-
-    // when the lights should start ramping up in minutes (7:20 AM = 7 * 60 + 20)
-    int start_time_minutes;
-    // for how long the lights should be ramping up to 100% for in minutes
-    int ramp_up_duration_minutes;
-    // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
-    int end_time_minutes;
-};
-
-// Indermediary state variable representation in the EEPROM
-// This is a separate struct, because the data is stored differently
-// in the EEPROM than used in the state.
-struct EEPROMState {
-    // minutes are stored in the EEPROM divided by 10, so that one days minutes
-    // fit in to a single byte. (1440 mins = 144, which is < 255)
-    int start_time_minutes;
-    int ramp_up_duration_minutes;
-    int end_time_minutes;
-
-    int clock_enabled;
-};
+void read_state_from_eeprom(State &state);
+void write_state_to_eeprom(State &state);
+void initialize_default_state_to_eeprom();
+bool eeprom_is_initialized();
 
 State state;
 EEPROMState eeprom_state;
@@ -103,6 +24,7 @@ EEPROMState eeprom_state;
 RTC_DS3231 rtc;
 LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
+const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
 const int eeprom_addrs[] = {
     ENABLED_ADDR,
     START_MINUTES_ADDR,
@@ -124,19 +46,12 @@ int eeprom_default_state_vals[] = {
     9 * 6  // end at 9AM (minutes/10)
 };
 
-void turn_on_lcd();
-void turn_off_lcd();
+static_assert(sizeof(eeprom_addrs) / sizeof(const int) == 
+        sizeof(eeprom_state_variables) / sizeof(int*));
 
-void turn_all_lights_on();
-void turn_all_lights_off();
+static_assert(sizeof(eeprom_default_state_vals) / sizeof(int) ==
+        sizeof(eeprom_state_variables) / sizeof(int*));
 
-bool button_state_changed(int);
-bool button_is(int, int);
-
-void read_state_from_eeprom(State &state);
-void write_state_to_eeprom(State &state);
-void initialize_default_state_to_eeprom();
-bool eeprom_is_initialized();
 
 void setup () 
 {
@@ -181,7 +96,7 @@ void setup ()
     }
 
     // Following line sets the RTC to the date & time this sketch was compiled
-    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    //rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 }
 
 void loop () 
