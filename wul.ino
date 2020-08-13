@@ -219,12 +219,22 @@ void loop ()
                     state.clock_is_disabled = temp_menu_state.clock_is_disabled;
                 }
                 if (state.current_clock_variable == ClockVariable::START_TIME) {
+                    if(temp_menu_state.end_time_minutes < temp_menu_state.start_time_minutes) {
+                        write_lcd("Start can't be", "after end time");
+                        delay(3000);
+                        return;
+                    }
                     state.start_time_minutes = temp_menu_state.start_time_minutes;
                 }
                 if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
                     state.ramp_up_duration_minutes = temp_menu_state.ramp_up_duration_minutes;
                 }
                 if (state.current_clock_variable == ClockVariable::END_TIME) {
+                    if(temp_menu_state.end_time_minutes < temp_menu_state.start_time_minutes) {
+                        write_lcd("End can't be", "before start");
+                        delay(3000);
+                        return;
+                    }
                     state.end_time_minutes = temp_menu_state.end_time_minutes;
                 }
 
@@ -241,6 +251,7 @@ void loop ()
         if (button_is(Button::GREEN, HIGH) && button_state_changed(Button::GREEN)) {
             if (state.current_clock_state == ClockState::CHANGING_VARIABLE) {
                 state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                temp_menu_state = state;
             } else if (state.current_clock_state == ClockState::VARIABLE_SELECTION) {
                 state.current_clock_state =
                     state.clock_is_disabled ? ClockState::DISABLED 
