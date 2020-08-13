@@ -55,8 +55,6 @@ enum Button {
 struct State {
     // current clock state
     ClockState current_clock_state = ClockState::ACTIVE_TIMER;
-    // previous clock state (used when exiting temporary states)
-    ClockState prev_clock_state = ClockState::ACTIVE_TIMER;
 
     // current variable displayed on lcd
     ClockVariable current_clock_variable = ClockVariable::DISABLE_CLOCK;
@@ -71,12 +69,19 @@ struct State {
     // when the last debounce happened in ms (used for debounce timer)
     int last_debounce_start = 0;
 
+    int last_blink_start = 0;
+
     // when the lights should start ramping up in minutes (7:20 AM = 7 * 60 + 20)
     int start_time_minutes;
     // for how long the lights should be ramping up to 100% for in minutes
     int ramp_up_duration_minutes;
     // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
     int end_time_minutes;
+
+    bool clock_is_disabled;
+
+    String lcd_top_line;
+    String lcd_bottom_line;
 };
 
 // Indermediary state variable representation in the EEPROM
@@ -88,6 +93,5 @@ struct EEPROMState {
     int start_time_minutes;
     int ramp_up_duration_minutes;
     int end_time_minutes;
-
     int clock_enabled;
 };
