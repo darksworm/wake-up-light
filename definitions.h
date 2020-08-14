@@ -78,7 +78,7 @@ struct State {
     // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
     int end_time_minutes;
 
-    bool clock_is_disabled;
+    int clock_is_disabled;
 
     String lcd_top_line;
     String lcd_bottom_line;
@@ -95,3 +95,17 @@ struct EEPROMState {
     int end_time_minutes;
     int clock_enabled;
 };
+
+struct MenuItem {
+    ClockVariable variable;
+    String variable_str;
+
+    int menu_value;
+    int* value_in_state;
+
+    String (*variable_val_str)(MenuItem*);
+
+    void (*increment)(MenuItem*);
+    void (*decrement)(MenuItem*);
+};
+

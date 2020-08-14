@@ -1,8 +1,9 @@
 #include <Wire.h>
 #include <LiquidCrystal.h>
-#include <EEPROM.h>
 #include "RTClib.h"
 #include "definitions.h"
+#include "formatting.h"
+#include "eeprom.h"
 
 void turn_on_lcd();
 void turn_off_lcd();
@@ -12,56 +13,125 @@ void clear_lcd();
 void turn_all_lights_on();
 void turn_all_lights_off();
 
-bool button_state_changed(int);
-bool button_is(int, int);
+bool button_changed_to(int, int);
 
-void read_state_from_eeprom(State &state);
-void write_state_to_eeprom(State &state);
-void initialize_default_state_to_eeprom();
-bool eeprom_is_initialized();
-String current_variable_str();
-String current_variable_val_str();
-ClockVariable next_variable();
-ClockVariable prev_variable();
-
-String minutes_to_time();
-String left_pad(int);
+ClockVariable next_variable(State);
+ClockVariable prev_variable(State);
 
 State state;
-EEPROMState eeprom_state;
-State temp_menu_state;
 
 RTC_DS3231 rtc;
 LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
 
+MenuItem menu_items[] = {
+    {
+        ClockVariable::DISABLE_CLOCK,
+        String("Disable clock?"),
+
+        state.clock_is_disabled,
+        &state.clock_is_disabled,
+
+        [](MenuItem* i) {
+            return String(i->menu_value ? "yes" : "no");
+        },
+
+        [](MenuItem* i) {
+            i->menu_value = !i->menu_value;
+        },
+        [](MenuItem* i) {
+            i->menu_value = !i->menu_value;
+        }
+    },
+    {
+        ClockVariable::START_TIME,
+        String("Start time"),
+
+        state.start_time_minutes,
+        &state.start_time_minutes,
+
+        [] (MenuItem* i) {
+            return minutes_to_time(i->menu_value);
+        },
+
+        [](MenuItem* i) {
+            if (i->menu_value >= 24*60 - 10) {
+                i->menu_value = 0;
+            } else {
+                i->menu_value = 10 + i->menu_value;
+            }
+        },
+        [](MenuItem* i) {
+            if (i->menu_value <= 0) {
+                i->menu_value = 23*60 + 50;
+            } else {
+                i->menu_value = -10 + i->menu_value;
+            }
+        }
+    },
+    {
+        ClockVariable::RAMP_UP_TIME,
+        String("Ramp up time"),
+
+        state.ramp_up_duration_minutes,
+        &state.ramp_up_duration_minutes,
+
+        [] (MenuItem* i) {
+            return minutes_to_duration(i->menu_value);
+        },
+
+        [](MenuItem* i) {
+            if(i->menu_value >= 3 * 60 - 10) {
+                i->menu_value = 0;
+            } else {
+                i->menu_value = 10 + i->menu_value;
+            }
+        },
+        [](MenuItem* i) {
+            if (i->menu_value <= 0) {
+                i->menu_value = 3 * 60;
+            } else {
+                i->menu_value = -10 + i->menu_value;
+            }
+        }
+    },
+    {
+        ClockVariable::END_TIME,
+        String("End time"),
+
+        state.end_time_minutes,
+        &state.end_time_minutes,
+
+        [] (MenuItem* i) {
+            return minutes_to_time(i->menu_value);
+        },
+
+        [](MenuItem* i) {
+            if (i->menu_value >= 24*60 - 10) {
+                i->menu_value = 0;
+            } else {
+                i->menu_value = 10 + i->menu_value;
+            }
+        },
+        [](MenuItem* i) {
+            if (i->menu_value <= 0) {
+                i->menu_value = 23*60 + 50;
+            } else {
+                i->menu_value = -10 + i->menu_value;
+            }
+        }
+    }
+};
+
+#define MENU_ITEM_COUNT sizeof(menu_items) / sizeof(MenuItem)
+
+void reset_menu_item_vals()
+{
+    for (int i = 0; i < sizeof(menu_items) / sizeof(MenuItem); i++) {
+        menu_items[i].menu_value = *menu_items[i].value_in_state;
+    }
+}
+
 const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
-const int eeprom_addrs[] = {
-    ENABLED_ADDR,
-    START_MINUTES_ADDR,
-    RAMP_UP_DURATION_MINUTES_ADDR,
-    END_MINUTES_ADDR
-};
-
-int* eeprom_state_variables[] = {
-    &eeprom_state.clock_enabled,
-    &eeprom_state.start_time_minutes,
-    &eeprom_state.ramp_up_duration_minutes,
-    &eeprom_state.end_time_minutes
-};
-
-int eeprom_default_state_vals[] = { 
-    1,     // enabled
-    7 * 6, // start at 7AM (minutes/10)
-    6,     // ramp for 1hr (minutes/10)
-    9 * 6  // end at 9AM (minutes/10)
-};
-
-static_assert(sizeof(eeprom_addrs) / sizeof(const int) == 
-        sizeof(eeprom_state_variables) / sizeof(int*));
-
-static_assert(sizeof(eeprom_default_state_vals) / sizeof(int) ==
-        sizeof(eeprom_state_variables) / sizeof(int*));
-
 
 void setup () 
 {
@@ -72,7 +142,8 @@ void setup ()
         initialize_default_state_to_eeprom();
     }
 
-    read_state_from_eeprom();
+    read_state_from_eeprom(state);
+    reset_menu_item_vals();
 
     int outputs[] = {HIGH1, LOW2, LOW1, RELAY, RELAY2, LCD_BACKLIGHT};
     int lowOutputs[] = {HIGH1, LOW2, LOW1, RELAY, RELAY2};
@@ -120,13 +191,16 @@ void loop ()
     bool is_in_timeframe = curr_mins >= state.start_time_minutes 
         && curr_mins < state.end_time_minutes;
 
-    if(state.current_clock_state != ClockState::VARIABLE_SELECTION && state.current_clock_state != ClockState::CHANGING_VARIABLE) {
+    if(state.current_clock_state != ClockState::VARIABLE_SELECTION 
+    && state.current_clock_state != ClockState::CHANGING_VARIABLE) {
         write_lcd(
             "Now: " + left_pad(hour) + ":" + left_pad(minute) + ":" + left_pad(second),
             "Alarm: " + minutes_to_time(state.start_time_minutes),
             false
         );
     }
+
+    auto menu_item = current_menu_item(state);
 
     if((ms - state.last_debounce_start) > DEBOUNCE_DELAY)
     {
@@ -136,71 +210,23 @@ void loop ()
             state.curr_button_state[i] = digitalRead(buttons[i]);
         }
 
-        if (button_is(Button::BLUE, HIGH) && button_state_changed(Button::BLUE)) {
+        if (button_changed_to(Button::BLUE, HIGH)) {
             if(is_in_timeframe && state.current_clock_state == ClockState::ACTIVE_TIMER) {
                 state.skip_day = state.skip_day == day ? -1 : day;
             } else if (state.current_clock_state == ClockState::VARIABLE_SELECTION) {
-                state.current_clock_variable = prev_variable();
+                state.current_clock_variable = prev_variable(state);
             } else if (state.current_clock_state == ClockState::CHANGING_VARIABLE) {
-                // dec variable
-                if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-                    temp_menu_state.clock_is_disabled = !temp_menu_state.clock_is_disabled;
-                }
-                if (state.current_clock_variable == ClockVariable::START_TIME) {
-                    if (temp_menu_state.start_time_minutes <= 0) {
-                        temp_menu_state.start_time_minutes = 23*60 + 50;
-                    } else {
-                        temp_menu_state.start_time_minutes = -10 + temp_menu_state.start_time_minutes;
-                    }
-                }
-                if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-                    if (temp_menu_state.ramp_up_duration_minutes <= 0) {
-                        temp_menu_state.ramp_up_duration_minutes = 3 * 60;
-                    } else {
-                        temp_menu_state.ramp_up_duration_minutes = -10 + temp_menu_state.ramp_up_duration_minutes;
-                    }
-                }
-                if (state.current_clock_variable ==  ClockVariable::END_TIME) {
-                    if (temp_menu_state.end_time_minutes <= 0) {
-                        temp_menu_state.end_time_minutes = 23*60 + 50;
-                    } else {
-                        temp_menu_state.end_time_minutes = -10 + temp_menu_state.end_time_minutes;
-                    }
-                }
+                menu_item->decrement(menu_item);
             }
 
             debounce = true;
         }
 
-        if (button_is(Button::RED, HIGH) && button_state_changed(Button::RED)) {
+        if (button_changed_to(Button::RED, HIGH)) {
             if(state.current_clock_state == ClockState::VARIABLE_SELECTION) {
-                state.current_clock_variable = next_variable();
+                state.current_clock_variable = next_variable(state);
             } else if (state.current_clock_state == ClockState::CHANGING_VARIABLE) {
-                // inc variable
-                if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-                    temp_menu_state.clock_is_disabled = !temp_menu_state.clock_is_disabled;
-                }
-                if (state.current_clock_variable == ClockVariable::START_TIME) {
-                    if (temp_menu_state.start_time_minutes >= 24*60 - 10) {
-                        temp_menu_state.start_time_minutes = 0;
-                    } else {
-                        temp_menu_state.start_time_minutes = 10 + temp_menu_state.start_time_minutes;
-                    }
-                }
-                if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-                    if(temp_menu_state.ramp_up_duration_minutes >= 3 * 60 - 10) {
-                        temp_menu_state.ramp_up_duration_minutes = 0;
-                    } else {
-                        temp_menu_state.ramp_up_duration_minutes = 10 + temp_menu_state.ramp_up_duration_minutes;
-                    }
-                }
-                if (state.current_clock_variable ==  ClockVariable::END_TIME) {
-                    if (temp_menu_state.end_time_minutes >= 24*60 - 10) {
-                        temp_menu_state.end_time_minutes = 0;
-                    } else {
-                        temp_menu_state.end_time_minutes = 10 + temp_menu_state.end_time_minutes;
-                    }
-                }
+                menu_item->increment(menu_item);
             } else if (state.current_clock_state != ClockState::LIGHTS_ON) {
                 state.current_clock_state = ClockState::LIGHTS_ON;
             } else {
@@ -212,46 +238,46 @@ void loop ()
             debounce = true;
         }
 
-        if (button_is(Button::WHITE, HIGH) && button_state_changed(Button::WHITE)) {
+        if (button_changed_to(Button::WHITE, HIGH)) {
             if(state.current_clock_state == ClockState::CHANGING_VARIABLE) {
                 // save
                 if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-                    state.clock_is_disabled = temp_menu_state.clock_is_disabled;
+                    state.clock_is_disabled = menu_item->menu_value;
                 }
                 if (state.current_clock_variable == ClockVariable::START_TIME) {
-                    if(temp_menu_state.end_time_minutes < temp_menu_state.start_time_minutes) {
+                    if(menu_item->menu_value > state.start_time_minutes) {
                         write_lcd("Start can't be", "after end time");
                         delay(3000);
                         return;
                     }
-                    state.start_time_minutes = temp_menu_state.start_time_minutes;
+                    state.start_time_minutes = menu_item->menu_value;
                 }
                 if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-                    state.ramp_up_duration_minutes = temp_menu_state.ramp_up_duration_minutes;
+                    state.ramp_up_duration_minutes = menu_item->menu_value;
                 }
                 if (state.current_clock_variable == ClockVariable::END_TIME) {
-                    if(temp_menu_state.end_time_minutes < temp_menu_state.start_time_minutes) {
+                    if(menu_item->menu_value < state.start_time_minutes) {
                         write_lcd("End can't be", "before start");
                         delay(3000);
                         return;
                     }
-                    state.end_time_minutes = temp_menu_state.end_time_minutes;
+                    state.end_time_minutes = menu_item->menu_value;
                 }
 
-                write_state_to_eeprom();
+                write_state_to_eeprom(state);
                 state.current_clock_state = ClockState::VARIABLE_SELECTION;
             } else if(state.current_clock_state == ClockState::VARIABLE_SELECTION) {
                 state.current_clock_state = ClockState::CHANGING_VARIABLE;
             } else {
                 state.current_clock_state = ClockState::VARIABLE_SELECTION;
-                temp_menu_state = state;
+                reset_menu_item_vals();
             }
         }
 
-        if (button_is(Button::GREEN, HIGH) && button_state_changed(Button::GREEN)) {
+        if (button_changed_to(Button::GREEN, HIGH)) {
             if (state.current_clock_state == ClockState::CHANGING_VARIABLE) {
                 state.current_clock_state = ClockState::VARIABLE_SELECTION;
-                temp_menu_state = state;
+                reset_menu_item_vals();
             } else if (state.current_clock_state == ClockState::VARIABLE_SELECTION) {
                 state.current_clock_state =
                     state.clock_is_disabled ? ClockState::DISABLED 
@@ -262,7 +288,7 @@ void loop ()
             } else {
                 turn_on_lcd();
             }
-        } else if (button_is(Button::GREEN, LOW) && button_state_changed(Button::GREEN) && state.current_clock_state != ClockState::VARIABLE_SELECTION && state.current_clock_state != ClockState::CHANGING_VARIABLE) {
+        } else if (button_changed_to(Button::GREEN, LOW) && state.current_clock_state != ClockState::VARIABLE_SELECTION && state.current_clock_state != ClockState::CHANGING_VARIABLE) {
             turn_off_lcd();
         }
 
@@ -275,22 +301,19 @@ void loop ()
         }
     }
 
-    String top_line, bottom_line;
+    String top_line = menu_item->variable_str,
+           bottom_line = menu_item->variable_val_str(menu_item);
+
     switch (state.current_clock_state) {
         case ClockState::LIGHTS_ON:
             turn_all_lights_on();
             return;
         case ClockState::VARIABLE_SELECTION:
-            top_line = current_variable_str();
-            bottom_line = current_variable_val_str();
 
             write_lcd(top_line, "> " + bottom_line);
             break;
         case ClockState::CHANGING_VARIABLE:
-            top_line = current_variable_str();
-            bottom_line = current_variable_val_str();
-
-            // don't blink while im pressing buttons
+            // don't blink while pressing buttons
             if (ms - state.last_debounce_start > 1000) {
                 if ((ms - state.last_blink_start) > 1500) {
                     state.last_blink_start = ms;
@@ -368,7 +391,7 @@ void write_lcd(String top_line, String bottom_line, bool turn_on_display)
     }
 
     if (state.lcd_top_line != top_line 
-            || state.lcd_bottom_line != bottom_line) {
+    || state.lcd_bottom_line != bottom_line) {
         lcd.clear();
         lcd.setCursor(0,0);
         lcd.print(top_line);
@@ -387,170 +410,36 @@ void clear_lcd()
     state.lcd_bottom_line = "";
 }
 
-bool button_state_changed(int btn) {
-    return state.prev_button_state[btn] != state.curr_button_state[btn];
+bool button_changed_to(int btn, int val) {
+    return state.prev_button_state[btn] != state.curr_button_state[btn]
+        && state.curr_button_state[btn] == val;
 }
 
-bool button_is(int btn, int val) {
-    return state.curr_button_state[btn] == val;
-}
-
-void read_state_from_eeprom() 
+ClockVariable next_variable(State state) 
 {
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        *eeprom_state_variables[i] = EEPROM.read(eeprom_addrs[i]);
+    int current_index = (int)state.current_clock_variable;
+    int result = current_index + 1;
+
+    if (result == MENU_ITEM_COUNT) {
+        result = 0;
     }
 
-    state.start_time_minutes = eeprom_state.start_time_minutes * 10;
-    state.ramp_up_duration_minutes = eeprom_state.ramp_up_duration_minutes * 10;
-    state.end_time_minutes = eeprom_state.end_time_minutes * 10;
-    state.clock_is_disabled = !eeprom_state.clock_enabled;
-    state.current_clock_state = eeprom_state.clock_enabled ?
-        ClockState::ACTIVE_TIMER : ClockState::DISABLED;
+    return (ClockVariable) result;
 }
 
-void write_state_to_eeprom()
+ClockVariable prev_variable(State state)
 {
-    eeprom_state.start_time_minutes = state.start_time_minutes / 10;
-    eeprom_state.ramp_up_duration_minutes = state.ramp_up_duration_minutes / 10;
-    eeprom_state.end_time_minutes = state.end_time_minutes / 10;
-    eeprom_state.clock_enabled = !state.clock_is_disabled;
+    int current_index = (int)state.current_clock_variable;
+    int result = current_index - 1;
 
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        EEPROM.write(eeprom_addrs[i], *eeprom_state_variables[i]);
+    if (result < 0) {
+        result = MENU_ITEM_COUNT - 1;
     }
+
+    return (ClockVariable) result;
 }
 
-void initialize_default_state_to_eeprom()
+MenuItem* current_menu_item(State state) 
 {
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        EEPROM.write(eeprom_addrs[i], eeprom_default_state_vals[i]);
-    }
-
-    EEPROM.write(EEPROM.length() - 1, MAGIC_NUMBER);
-}
-
-bool eeprom_is_initialized()
-{
-    return EEPROM.read(EEPROM.length() - 1) == MAGIC_NUMBER;
-}
-
-String current_variable_str()
-{
-    if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-        return "Disable clock?";
-    }
-    if (state.current_clock_variable == ClockVariable::START_TIME) {
-        return "Start time";
-    }
-    if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-        return "Ramp up time";
-    }
-    if (state.current_clock_variable == ClockVariable::END_TIME) {
-        return "End time";
-    }
-
-    return "unimplemented";
-}
-
-String minutes_to_time(int mins)
-{
-    int hrs = mins / 60;
-    int leftover_mins = mins - hrs * 60;
-
-    String result = String(hrs) + ":" + String(leftover_mins);
-
-    if (leftover_mins < 10) {
-        result += "0";
-    }
-
-    if (hrs < 10) {
-        result = "0" + result;
-    }
-    
-    return result;
-}
-
-String minutes_to_duration(int mins)
-{
-    if (mins == 0) {
-        return "instant";
-    }
-
-    String result = "";
-
-    int hrs = mins / 60;
-    int leftover_mins = mins - hrs * 60;
-
-    if (hrs > 1) {
-        result += String(hrs) + "hrs";
-    } else if (hrs != 0) {
-        result += String(hrs) + "hr";
-    }
-
-    if (hrs && leftover_mins) {
-        result += " ";
-    }
-
-    if (leftover_mins > 0) {
-        result += String(leftover_mins) + " mins";
-    }
-    
-    return result;
-}
-
-String current_variable_val_str()
-{
-    if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-        return temp_menu_state.clock_is_disabled ? "yes" : "no";
-    }
-    if (state.current_clock_variable == ClockVariable::START_TIME) {
-        return minutes_to_time(temp_menu_state.start_time_minutes);
-    }
-    if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-        return minutes_to_duration(temp_menu_state.ramp_up_duration_minutes);
-    }
-    if (state.current_clock_variable == ClockVariable::END_TIME) {
-        return minutes_to_time(temp_menu_state.end_time_minutes);
-    }
-
-    return "unimplemented";
-}
-
-ClockVariable next_variable() 
-{
-    if (state.current_clock_variable == ClockVariable::DISABLE_CLOCK) {
-        return ClockVariable::START_TIME;
-    }
-    if (state.current_clock_variable == ClockVariable::START_TIME) {
-        return ClockVariable::RAMP_UP_TIME;
-    }
-    if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-        return ClockVariable::END_TIME;
-    }
-
-    return ClockVariable::DISABLE_CLOCK;
-}
-
-ClockVariable prev_variable()
-{
-    if (state.current_clock_variable == ClockVariable::START_TIME) {
-        return ClockVariable::DISABLE_CLOCK;
-    }
-    if (state.current_clock_variable == ClockVariable::RAMP_UP_TIME) {
-        return ClockVariable::START_TIME;
-    }
-    if (state.current_clock_variable == ClockVariable::END_TIME) {
-        return ClockVariable::RAMP_UP_TIME;
-    }
-
-    return ClockVariable::END_TIME;
-}
-
-String left_pad(int v) {
-    if(v < 10) {
-        return "0" + String(v);
-    }
-
-    return String(v);
+    return &menu_items[(int)state.current_clock_variable];
 }
