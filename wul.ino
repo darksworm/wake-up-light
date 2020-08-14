@@ -176,6 +176,8 @@ void setup ()
     }
 }
 
+int last_step = -1;
+
 void loop () 
 {   
     DateTime now = rtc.now();
@@ -230,9 +232,7 @@ void loop ()
             } else if (state.current_clock_state != ClockState::LIGHTS_ON) {
                 state.current_clock_state = ClockState::LIGHTS_ON;
             } else {
-                state.current_clock_state =
-                    state.clock_is_disabled ? ClockState::DISABLED 
-                    : ClockState::ACTIVE_TIMER;
+                state.current_clock_state = ClockState::ACTIVE_TIMER;
             }
 
             debounce = true;
@@ -245,7 +245,7 @@ void loop ()
                     state.clock_is_disabled = menu_item->menu_value;
                 }
                 if (state.current_clock_variable == ClockVariable::START_TIME) {
-                    if(menu_item->menu_value > state.start_time_minutes) {
+                    if(menu_item->menu_value > state.end_time_minutes) {
                         write_lcd("Start can't be", "after end time");
                         delay(3000);
                         return;
@@ -279,10 +279,7 @@ void loop ()
                 state.current_clock_state = ClockState::VARIABLE_SELECTION;
                 reset_menu_item_vals();
             } else if (state.current_clock_state == ClockState::VARIABLE_SELECTION) {
-                state.current_clock_state =
-                    state.clock_is_disabled ? ClockState::DISABLED 
-                    : ClockState::ACTIVE_TIMER;
-
+                state.current_clock_state = ClockState::ACTIVE_TIMER;
                 clear_lcd();
                 turn_off_lcd();
             } else {
@@ -328,15 +325,20 @@ void loop ()
             break;
     }
 
-    if (state.skip_day == day || !is_in_timeframe) {
+    if (state.skip_day == day || !is_in_timeframe || state.clock_is_disabled) {
         turn_all_lights_off();
         return;
     }
 
     // LED ramp-up
     {
-        const int steps_between = state.ramp_up_duration_minutes;
         const int current_step = curr_mins - state.start_time_minutes;
+
+        if(current_step == last_step) {
+            return;
+        }
+
+        const int steps_between = state.ramp_up_duration_minutes;
 
         digitalWrite(RELAY, LOW);
         digitalWrite(RELAY2, LOW);
@@ -351,6 +353,8 @@ void loop ()
             analogWrite(LOW1, 255);
             analogWrite(LOW2, (float)(current_step - step_interval) / step_interval * 255);
         }      
+
+        last_step = current_step;
     }
 }
 
@@ -366,6 +370,7 @@ void turn_all_lights_on()
 
 void turn_all_lights_off()
 {
+    last_step = -1;
     digitalWrite(RELAY, HIGH);
     digitalWrite(RELAY2, HIGH);
 

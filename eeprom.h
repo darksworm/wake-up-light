@@ -41,8 +41,6 @@ void read_state_from_eeprom(State& state)
     state.ramp_up_duration_minutes = eeprom_state.ramp_up_duration_minutes * 10;
     state.end_time_minutes = eeprom_state.end_time_minutes * 10;
     state.clock_is_disabled = !eeprom_state.clock_enabled;
-    state.current_clock_state = eeprom_state.clock_enabled ?
-        ClockState::ACTIVE_TIMER : ClockState::DISABLED;
 }
 
 void write_state_to_eeprom(State state)
