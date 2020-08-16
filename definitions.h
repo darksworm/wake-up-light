@@ -62,6 +62,9 @@ struct State {
     // calendar number of day to skip
     int skip_day = -1;
 
+    // last brightness step
+    int last_step = 0;
+
     // previous button states (used for checking whether a change happened)
     int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
     // current button states
@@ -77,7 +80,7 @@ struct State {
     int ramp_up_duration_minutes;
     // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
     int end_time_minutes;
-
+    // whether to disable the lights clock
     int clock_is_disabled;
 
     String lcd_top_line;
