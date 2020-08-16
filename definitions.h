@@ -11,9 +11,9 @@
 #define BTN_BLUE 11
 #define BTN_RED 12
 #define BTN_WHITE 10
-#define BTN_GREEN 13 
-#define BTN_COUNT 4 
-#define RELAY2 9 
+#define BTN_GREEN 13
+#define BTN_COUNT 4
+#define RELAY2 9
 #define RELAY 8
 #define HIGH1 4
 #define LOW2 6
@@ -45,14 +45,16 @@ enum class ClockVariable
     END_TIME
 };
 
-enum Button {
+enum Button
+{
     BLUE = 0,
     RED = 1,
     WHITE = 2,
     GREEN = 3
 };
 
-struct State {
+struct State
+{
     // current clock state
     ClockState current_clock_state = ClockState::ACTIVE_TIMER;
 
@@ -90,7 +92,8 @@ struct State {
 // Indermediary state variable representation in the EEPROM
 // This is a separate struct, because the data is stored differently
 // in the EEPROM than used in the state.
-struct EEPROMState {
+struct EEPROMState
+{
     // minutes are stored in the EEPROM divided by 10, so that one days minutes
     // fit in to a single byte. (1440 mins = 144, which is < 255)
     int start_time_minutes;
@@ -99,16 +102,18 @@ struct EEPROMState {
     int clock_enabled;
 };
 
-struct MenuItem {
+struct MenuItem
+{
     ClockVariable variable;
     String variable_str;
 
     int menu_value;
-    int* value_in_state;
+    int *value_in_state;
 
-    String (*variable_val_str)(MenuItem*);
+    String (*variable_val_str)(MenuItem *);
 
-    void (*increment)(MenuItem*);
-    void (*decrement)(MenuItem*);
+    void (*increment)(MenuItem *);
+
+    void (*decrement)(MenuItem *);
 };
 
