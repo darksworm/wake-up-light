@@ -30,7 +30,6 @@
 
 enum class ClockState
 {
-    DISABLED,
     ACTIVE_TIMER,
     LIGHTS_ON,
     VARIABLE_SELECTION,
@@ -85,6 +84,8 @@ struct State
     // whether to disable the lights clock
     int clock_is_disabled;
 
+    bool approving_invalid_val = false;
+
     String lcd_top_line;
     String lcd_bottom_line;
 };
@@ -113,7 +114,7 @@ struct MenuItem
     String (*variable_val_str)(MenuItem *);
 
     void (*increment)(MenuItem *);
-
     void (*decrement)(MenuItem *);
+    bool (*is_valid)(MenuItem *, State&);
 };
 

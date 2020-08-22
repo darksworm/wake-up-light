@@ -21,6 +21,7 @@ ClockVariable next_variable(State);
 ClockVariable prev_variable(State);
 
 bool state_is(State, ClockState);
+void read_buttons(State&); 
 
 State global_state;
 RTC_DS3231 rtc;
@@ -46,6 +47,10 @@ MenuItem menu_items[] = {
         [](MenuItem *i)
         {
             i->menu_value = !i->menu_value;
+        },
+        [](MenuItem *i, State& s)
+        {
+            return true;
         }
     },
     {
@@ -81,6 +86,11 @@ MenuItem menu_items[] = {
             {
                 i->menu_value = -10 + i->menu_value;
             }
+        },
+        [](MenuItem *i, State& s)
+        {
+            return i->menu_value < s.end_time_minutes &&
+                s.end_time_minutes - i->menu_value >= s.ramp_up_duration_minutes;
         }
     },
     {
@@ -116,6 +126,10 @@ MenuItem menu_items[] = {
             {
                 i->menu_value = -10 + i->menu_value;
             }
+        },
+        [](MenuItem *i, State& s)
+        {
+            return s.end_time_minutes - s.start_time_minutes >= i->menu_value;
         }
     },
     {
@@ -151,6 +165,11 @@ MenuItem menu_items[] = {
             {
                 i->menu_value = -10 + i->menu_value;
             }
+        },
+        [](MenuItem *i, State& s)
+        {
+            return i->menu_value > s.start_time_minutes &&
+                 i->menu_value - s.start_time_minutes >= s.ramp_up_duration_minutes;
         }
     }
 };
@@ -226,11 +245,7 @@ void loop()
     if ((ms - global_state.last_debounce_start) > DEBOUNCE_DELAY)
     {
         bool debounce = false;
-
-        for (int i = 0; i < BTN_COUNT; i++)
-        {
-            global_state.curr_button_state[i] = digitalRead(buttons[i]);
-        }
+        read_buttons(global_state);
 
         if (button_changed_to(global_state, Button::BLUE, HIGH))
         {
@@ -276,38 +291,19 @@ void loop()
         {
             if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
-                // save
-                if (global_state.current_clock_variable == ClockVariable::DISABLE_CLOCK)
-                {
-                    global_state.clock_is_disabled = menu_item->menu_value;
-                }
-                if (global_state.current_clock_variable == ClockVariable::START_TIME)
-                {
-                    if (menu_item->menu_value > global_state.end_time_minutes)
-                    {
-                        write_lcd(global_state, "Start can't be", "after end time");
-                        delay(3000);
-                        return;
-                    }
-                    global_state.start_time_minutes = menu_item->menu_value;
-                }
-                if (global_state.current_clock_variable == ClockVariable::RAMP_UP_TIME)
-                {
-                    global_state.ramp_up_duration_minutes = menu_item->menu_value;
-                }
-                if (global_state.current_clock_variable == ClockVariable::END_TIME)
-                {
-                    if (menu_item->menu_value < global_state.start_time_minutes)
-                    {
-                        write_lcd(global_state, "End can't be", "before start");
-                        delay(3000);
-                        return;
-                    }
-                    global_state.end_time_minutes = menu_item->menu_value;
-                }
+                bool is_valid = menu_item->is_valid(menu_item, global_state);
 
-                write_state_to_eeprom(global_state);
-                global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                if (is_valid || global_state.approving_invalid_val) {
+                    *menu_item->value_in_state = menu_item->menu_value;
+                    write_state_to_eeprom(global_state);
+
+                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                    global_state.approving_invalid_val = false;
+                } 
+                else
+                {
+                    global_state.approving_invalid_val = true;
+                }
             }
             else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
             {
@@ -324,7 +320,12 @@ void loop()
         {
             if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
-                global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                if (!global_state.approving_invalid_val)
+                {
+                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                }
+
+                global_state.approving_invalid_val = false;
                 reset_menu_item_vals();
             }
             else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
@@ -368,29 +369,57 @@ void loop()
         }
         else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
         {
-            // don't blink while pressing buttons
-            if (ms - global_state.last_debounce_start > 1000)
+            if (global_state.approving_invalid_val) 
             {
-                if ((ms - global_state.last_blink_start) > 1500)
+                write_lcd(global_state, "Invalid value!", "Save anyway?");
+            } 
+            else
+            {
+                // don't blink while pressing buttons
+                if (ms - global_state.last_debounce_start > 1000)
                 {
-                    global_state.last_blink_start = ms;
+                    if ((ms - global_state.last_blink_start) > 1500)
+                    {
+                        global_state.last_blink_start = ms;
+                    }
+
+                    if (ms - global_state.last_blink_start < 750)
+                    {
+                        bottom_line = "";
+                    }
                 }
 
-                if (ms - global_state.last_blink_start < 750)
-                {
-                    bottom_line = "";
-                }
+                write_lcd(global_state, top_line, "> " + bottom_line);
             }
-
-            write_lcd(global_state, top_line, "> " + bottom_line);
         }
     }
     else
     {
+        String top_text = "Now: " + left_pad(now.hour()) + ":" 
+            + left_pad(now.minute()) + ":" + left_pad(now.second());
+
+        String bottom_text = "";
+
+        for (int i = 0; i < MENU_ITEM_COUNT; i++)
+        {
+            if (!menu_items[i].is_valid(&menu_items[i], global_state)) 
+            {
+                bottom_text = "Bad settings!";
+                break;
+            }
+        }
+
+        if (bottom_text == "")
+        {
+            bottom_text = global_state.clock_is_disabled ?
+                "Alarm disabled" : 
+                "Alarm: " + minutes_to_time(global_state.start_time_minutes);
+        }
+
         write_lcd(
             global_state,
-            "Now: " + left_pad(now.hour()) + ":" + left_pad(now.minute()) + ":" + left_pad(now.second()),
-            "Alarm: " + minutes_to_time(global_state.start_time_minutes),
+            top_text,
+            bottom_text,
             false
         );
     }
@@ -546,4 +575,12 @@ bool in_menu(State state)
 {
     return state_is(state, ClockState::CHANGING_VARIABLE)
            || state_is(state, ClockState::VARIABLE_SELECTION);
+}
+
+void read_buttons(State& global_state) 
+{
+    for (int i = 0; i < BTN_COUNT; i++)
+    {
+        global_state.curr_button_state[i] = digitalRead(buttons[i]);
+    }
 }
