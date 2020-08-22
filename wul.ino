@@ -97,7 +97,7 @@ MenuItem menu_items[] = {
 
         [](MenuItem *i)
         {
-            if (i->menu_value >= 3 * 60 - 10)
+            if (i->menu_value >= 3 * 60)
             {
                 i->menu_value = 0;
             }
