@@ -3,8 +3,8 @@
 #define LCD_ENABLE A1
 #define LCD_D4 A2
 #define LCD_D5 A3
-#define LCD_D6 A4
-#define LCD_D7 A5
+#define LCD_D6 3
+#define LCD_D7 2
 #define LCD_RS A0
 #define LCD_BACKLIGHT 7
 
