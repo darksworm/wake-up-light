@@ -338,12 +338,15 @@ void loop()
             }
             else
             {
-                turn_on_lcd();
+                if (digitalRead(LCD_BACKLIGHT))
+                {
+                    turn_off_lcd();
+                }
+                else
+                {
+                    turn_on_lcd();
+                }
             }
-        }
-        else if (button_changed_to(global_state, Button::GREEN, LOW) && !in_menu(global_state))
-        {
-            turn_off_lcd();
         }
 
         for (int i = 0; i < BTN_COUNT; i++)
