@@ -1,20 +1,6 @@
 #include <EEPROM.h>
 #include "definitions.h"
 
-#define COMMA ,
-#define DECL_STATEVARS(var_name, state_var_name)  \
-    int* var_name[] = { \
-        STORABLE_STATE_VARIABLES(&state_var_name.,COMMA)\
-    };
-
-#define DECL_VARS \
-    DECL_STATEVARS(state_variables, state); \
-    static_assert(sizeof(state_variables) / sizeof(int*) \
-            == sizeof(eeprom_default_state_vals) / sizeof(int), \
-            "State variable count doesnt match eeprom state variable count");
-
-#define STATE_SIZE sizeof(eeprom_default_state_vals) / sizeof(int)
-
 int eeprom_default_state_vals[] = { 
     1,      // clock enabled
     7 * 60, // start at 7AM (minutes/10)
@@ -24,6 +10,17 @@ int eeprom_default_state_vals[] = {
     7 * 60, // target start time same as start time
     8       // adjusted on non-existant day
 };
+
+#define COMMA ,
+#define DECL_VARS \
+    int* state_variables[] = { \
+        STORABLE_STATE_VARIABLES(&state.,COMMA) \
+    }; \
+    static_assert(sizeof(state_variables) / sizeof(int*) \
+            == sizeof(eeprom_default_state_vals) / sizeof(int), \
+            "State variable count doesnt match eeprom state variable count");
+
+#define STATE_SIZE sizeof(eeprom_default_state_vals) / sizeof(int)
 
 void read_state_from_eeprom(State& state) 
 {
