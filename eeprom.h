@@ -1,16 +1,6 @@
 #include <EEPROM.h>
 #include "definitions.h"
 
-int eeprom_default_state_vals[] = { 
-    1,      // clock enabled
-    7 * 60, // start at 7AM (minutes/10)
-    60,     // ramp for 1hr (minutes/10)
-    9 * 60, // end at 9AM (minutes/10)
-    0,      // no auto adjustment
-    7 * 60, // target start time same as start time
-    8       // adjusted on non-existant day
-};
-
 #define COMMA ,
 #define DECL_VARS \
     int* state_variables[] = { \

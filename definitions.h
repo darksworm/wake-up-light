@@ -22,7 +22,7 @@
 #define DEBOUNCE_DELAY 200
 
 #define MAGIC_NUMBER_ADDR 0
-#define MAGIC_NUMBER 206
+#define MAGIC_NUMBER 137
 #define STATE_ADDR 1
 
 enum class ClockState
@@ -67,6 +67,16 @@ enum Button
     prefix target_start_time_minutes suffix \
     /* on which day the last adjustment took place */ \
     prefix last_adjustment_day suffix
+
+int eeprom_default_state_vals[] = { 
+    7 * 60 + 30, // start at 7:30AM
+    30,          // ramp for 30min
+    8 * 60 + 30, // end at 8:30AM 
+    0,           // clock enabled
+    0,           // no auto adjustment
+    7 * 60 + 30, // target start time same as start time
+    32            // adjust on non-existant day
+};
 
 struct State
 {
