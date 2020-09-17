@@ -143,6 +143,7 @@ MenuItem menu_items[] = {
         {
             return minutes_to_time(i->menu_value);
         },
+
         [](MenuItem *i)
         {
             if (i->menu_value >= 24 * 60 - 10)
