@@ -5,8 +5,6 @@
 #include "formatting.h"
 #include "eeprom.h"
 
-#define GS global_state
-
 void turn_on_lcd();
 void turn_off_lcd();
 void write_lcd(State &, String, String, bool = true);
@@ -34,8 +32,8 @@ MenuItem menu_items[] = {
         ClockVariable::DISABLE_CLOCK,
         String("Disable clock?"),
 
-        GS.clock_is_disabled,
-        &GS.clock_is_disabled,
+        global_state.clock_is_disabled,
+        &global_state.clock_is_disabled,
 
         [](MenuItem *i)
         {
@@ -59,8 +57,8 @@ MenuItem menu_items[] = {
         ClockVariable::START_TIME,
         String("Start time"),
 
-        GS.start_time_minutes,
-        &GS.start_time_minutes,
+        global_state.start_time_minutes,
+        &global_state.start_time_minutes,
 
         [](MenuItem *i)
         {
@@ -99,8 +97,8 @@ MenuItem menu_items[] = {
         ClockVariable::RAMP_UP_TIME,
         String("Ramp up time"),
 
-        GS.ramp_up_duration_minutes,
-        &GS.ramp_up_duration_minutes,
+        global_state.ramp_up_duration_minutes,
+        &global_state.ramp_up_duration_minutes,
 
         [](MenuItem *i)
         {
@@ -138,8 +136,8 @@ MenuItem menu_items[] = {
         ClockVariable::END_TIME,
         String("End time"),
 
-        GS.end_time_minutes,
-        &GS.end_time_minutes,
+        global_state.end_time_minutes,
+        &global_state.end_time_minutes,
 
         [](MenuItem *i)
         {
@@ -177,8 +175,8 @@ MenuItem menu_items[] = {
         ClockVariable::AUTO_ADJUST_DURATION,
         String("Daily adjustment"),
 
-        GS.auto_adjust_duration_daily_minutes,
-        &GS.auto_adjust_duration_daily_minutes,
+        global_state.auto_adjust_duration_daily_minutes,
+        &global_state.auto_adjust_duration_daily_minutes,
 
         [](MenuItem *i)
         {
@@ -217,8 +215,8 @@ MenuItem menu_items[] = {
         ClockVariable::TARGET_START_TIME,
         String("Target start"),
 
-        GS.target_start_time_minutes,
-        &GS.target_start_time_minutes,
+        global_state.target_start_time_minutes,
+        &global_state.target_start_time_minutes,
 
         [](MenuItem *i)
         {
@@ -268,7 +266,7 @@ void setup()
         initialize_default_state_to_eeprom();
     }
 
-    read_state_from_eeprom(GS);
+    read_state_from_eeprom(global_state);
     reset_menu_item_vals();
 
     int outputs[] = {HIGH1, LOW2, LOW1, RELAY, RELAY2, LCD_BACKLIGHT};
@@ -309,35 +307,35 @@ void setup()
 
 void loop()
 {
-    auto menu_item = current_menu_item(GS);
+    auto menu_item = current_menu_item(global_state);
 
     DateTime now = rtc.now();
     const unsigned int ms = millis();
     const unsigned curr_mins = now.hour() * 60 + now.minute();
 
     bool is_in_timeframe =
-        curr_mins >= GS.start_time_minutes
-        && curr_mins < GS.end_time_minutes
-        && !GS.clock_is_disabled
-        && GS.skip_day != now.day();
+        curr_mins >= global_state.start_time_minutes
+        && curr_mins < global_state.end_time_minutes
+        && !global_state.clock_is_disabled
+        && global_state.skip_day != now.day();
 
     // read button states
-    if ((ms - GS.last_debounce_start) > DEBOUNCE_DELAY)
+    if ((ms - global_state.last_debounce_start) > DEBOUNCE_DELAY)
     {
         bool debounce = false;
-        read_buttons(GS);
+        read_buttons(global_state);
 
-        if (button_changed_to(GS, Button::BLUE, HIGH))
+        if (button_changed_to(global_state, Button::BLUE, HIGH))
         {
-            if (is_in_timeframe && state_is(GS, ClockState::ACTIVE_TIMER))
+            if (is_in_timeframe && state_is(global_state, ClockState::ACTIVE_TIMER))
             {
-                GS.skip_day = GS.skip_day == now.day() ? -1 : now.day();
+                global_state.skip_day = global_state.skip_day == now.day() ? -1 : now.day();
             }
-            else if (state_is(GS, ClockState::VARIABLE_SELECTION))
+            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
             {
-                GS.current_clock_variable = prev_variable(GS);
+                global_state.current_clock_variable = prev_variable(global_state);
             }
-            else if (state_is(GS, ClockState::CHANGING_VARIABLE))
+            else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
                 menu_item->decrement(menu_item);
             }
@@ -345,75 +343,75 @@ void loop()
             debounce = true;
         }
 
-        if (button_changed_to(GS, Button::RED, HIGH))
+        if (button_changed_to(global_state, Button::RED, HIGH))
         {
-            if (state_is(GS, ClockState::VARIABLE_SELECTION))
+            if (state_is(global_state, ClockState::VARIABLE_SELECTION))
             {
-                GS.current_clock_variable = next_variable(GS);
+                global_state.current_clock_variable = next_variable(global_state);
             }
-            else if (state_is(GS, ClockState::CHANGING_VARIABLE))
+            else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
                 menu_item->increment(menu_item);
             }
-            else if (!state_is(GS, ClockState::LIGHTS_ON))
+            else if (!state_is(global_state, ClockState::LIGHTS_ON))
             {
-                GS.current_clock_state = ClockState::LIGHTS_ON;
+                global_state.current_clock_state = ClockState::LIGHTS_ON;
             }
             else
             {
-                GS.current_clock_state = ClockState::ACTIVE_TIMER;
+                global_state.current_clock_state = ClockState::ACTIVE_TIMER;
             }
 
             debounce = true;
         }
 
-        if (button_changed_to(GS, Button::WHITE, HIGH))
+        if (button_changed_to(global_state, Button::WHITE, HIGH))
         {
-            if (state_is(GS, ClockState::CHANGING_VARIABLE))
+            if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
-                bool is_valid = menu_item->is_valid(menu_item, GS);
+                bool is_valid = menu_item->is_valid(menu_item, global_state);
 
-                if (is_valid || GS.approving_invalid_val) {
+                if (is_valid || global_state.approving_invalid_val) {
                     *menu_item->value_in_state = menu_item->menu_value;
-                    write_state_to_eeprom(GS);
+                    write_state_to_eeprom(global_state);
 
-                    GS.current_clock_state = ClockState::VARIABLE_SELECTION;
-                    GS.approving_invalid_val = false;
+                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
+                    global_state.approving_invalid_val = false;
                 } 
                 else
                 {
-                    GS.approving_invalid_val = true;
+                    global_state.approving_invalid_val = true;
                 }
             }
-            else if (state_is(GS, ClockState::VARIABLE_SELECTION))
+            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
             {
-                GS.current_clock_state = ClockState::CHANGING_VARIABLE;
+                global_state.current_clock_state = ClockState::CHANGING_VARIABLE;
             }
             else
             {
-                GS.current_clock_state = ClockState::VARIABLE_SELECTION;
+                global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
                 reset_menu_item_vals();
             }
         }
 
-        if (button_changed_to(GS, Button::GREEN, HIGH))
+        if (button_changed_to(global_state, Button::GREEN, HIGH))
         {
-            if (state_is(GS, ClockState::CHANGING_VARIABLE))
+            if (state_is(global_state, ClockState::CHANGING_VARIABLE))
             {
-                if (!GS.approving_invalid_val)
+                if (!global_state.approving_invalid_val)
                 {
-                    GS.current_clock_state = ClockState::VARIABLE_SELECTION;
+                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
                 }
 
-                GS.approving_invalid_val = false;
+                global_state.approving_invalid_val = false;
                 reset_menu_item_vals();
             }
-            else if (state_is(GS, ClockState::VARIABLE_SELECTION))
+            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
             {
-                GS.current_clock_state = ClockState::ACTIVE_TIMER;
-                GS.current_clock_variable = ClockVariable::DISABLE_CLOCK;
+                global_state.current_clock_state = ClockState::ACTIVE_TIMER;
+                global_state.current_clock_variable = ClockVariable::DISABLE_CLOCK;
 
-                clear_lcd(GS);
+                clear_lcd(global_state);
                 turn_off_lcd();
             }
             else
@@ -431,48 +429,48 @@ void loop()
 
         for (int i = 0; i < BTN_COUNT; i++)
         {
-            GS.prev_button_state[i] = GS.curr_button_state[i];
+            global_state.prev_button_state[i] = global_state.curr_button_state[i];
         }
 
         if (debounce)
         {
-            GS.last_debounce_start = ms;
+            global_state.last_debounce_start = ms;
         }
     }
 
     // draw menu / time
-    if (in_menu(GS))
+    if (in_menu(global_state))
     {
         String top_line = menu_item->variable_str,
             bottom_line = menu_item->variable_val_str(menu_item);
 
-        if (state_is(GS, ClockState::VARIABLE_SELECTION))
+        if (state_is(global_state, ClockState::VARIABLE_SELECTION))
         {
-            write_lcd(GS, top_line, "> " + bottom_line);
+            write_lcd(global_state, top_line, "> " + bottom_line);
         }
-        else if (state_is(GS, ClockState::CHANGING_VARIABLE))
+        else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
         {
-            if (GS.approving_invalid_val) 
+            if (global_state.approving_invalid_val) 
             {
-                write_lcd(GS, "Invalid value!", "Save anyway?");
+                write_lcd(global_state, "Invalid value!", "Save anyway?");
             } 
             else
             {
                 // don't blink while pressing buttons
-                if (ms - GS.last_debounce_start > 1000)
+                if (ms - global_state.last_debounce_start > 1000)
                 {
-                    if ((ms - GS.last_blink_start) > 1500)
+                    if ((ms - global_state.last_blink_start) > 1500)
                     {
-                        GS.last_blink_start = ms;
+                        global_state.last_blink_start = ms;
                     }
 
-                    if (ms - GS.last_blink_start < 750)
+                    if (ms - global_state.last_blink_start < 750)
                     {
                         bottom_line = "";
                     }
                 }
 
-                write_lcd(GS, top_line, "> " + bottom_line);
+                write_lcd(global_state, top_line, "> " + bottom_line);
             }
         }
     }
@@ -485,7 +483,7 @@ void loop()
 
         for (int i = 0; i < MENU_ITEM_COUNT; i++)
         {
-            if (!menu_items[i].is_valid(&menu_items[i], GS)) 
+            if (!menu_items[i].is_valid(&menu_items[i], global_state)) 
             {
                 bottom_text = "Bad settings!";
                 break;
@@ -494,27 +492,27 @@ void loop()
 
         if (bottom_text == "")
         {
-            bottom_text = GS.clock_is_disabled ?
+            bottom_text = global_state.clock_is_disabled ?
                 "Alarm disabled" : 
-                "Alarm: " + minutes_to_time(GS.start_time_minutes);
+                "Alarm: " + minutes_to_time(global_state.start_time_minutes);
         }
 
         write_lcd(
-            GS,
+            global_state,
             top_text,
             bottom_text,
             false
         );
     }
 
-    if (state_is(GS, ClockState::LIGHTS_ON))
+    if (state_is(global_state, ClockState::LIGHTS_ON))
     {
         turn_all_lights_on();
     }
     else if (!is_in_timeframe)
     {
         // turn all lights off
-        GS.last_step = -1;
+        global_state.last_step = -1;
         digitalWrite(RELAY, HIGH);
         digitalWrite(RELAY2, HIGH);
 
@@ -525,53 +523,53 @@ void loop()
     else
     {
         bool should_adjust_time = 
-            GS.last_adjustment_day != now.day() &&
-            GS.auto_adjust_duration_daily_minutes > 0 && 
-            GS.target_start_time_minutes != GS.start_time_minutes;
+            global_state.last_adjustment_day != now.day() &&
+            global_state.auto_adjust_duration_daily_minutes > 0 && 
+            global_state.target_start_time_minutes != global_state.start_time_minutes;
 
         if (should_adjust_time) 
         {
             int multiplier = 
-                GS.target_start_time_minutes > GS.start_time_minutes ? 1 : -1;
+                global_state.target_start_time_minutes > global_state.start_time_minutes ? 1 : -1;
 
-            int adjustment = multiplier * GS.auto_adjust_duration_daily_minutes;
+            int adjustment = multiplier * global_state.auto_adjust_duration_daily_minutes;
             {
-                int adjusted_start = GS.start_time_minutes + adjustment;
+                int adjusted_start = global_state.start_time_minutes + adjustment;
 
-                if (1 == multiplier && adjusted_start > GS.target_start_time_minutes)
+                if (1 == multiplier && adjusted_start > global_state.target_start_time_minutes)
                 {
-                    adjustment = GS.target_start_time_minutes - GS.start_time_minutes;
+                    adjustment = global_state.target_start_time_minutes - global_state.start_time_minutes;
                 } 
-                else if (-1 == multiplier && adjusted_start < GS.target_start_time_minutes)
+                else if (-1 == multiplier && adjusted_start < global_state.target_start_time_minutes)
                 {
-                    adjustment = GS.target_start_time_minutes - GS.start_time_minutes;
+                    adjustment = global_state.target_start_time_minutes - global_state.start_time_minutes;
                 }
             }
 
-            GS.start_time_minutes += adjustment;
-            GS.end_time_minutes += adjustment;
-            GS.last_adjustment_day = now.day();
+            global_state.start_time_minutes += adjustment;
+            global_state.end_time_minutes += adjustment;
+            global_state.last_adjustment_day = now.day();
 
-            if (GS.start_time_minutes == GS.target_start_time_minutes)
+            if (global_state.start_time_minutes == global_state.target_start_time_minutes)
             {
                 // adjustment has finished, disable it
-                GS.auto_adjust_duration_daily_minutes = 0;
+                global_state.auto_adjust_duration_daily_minutes = 0;
             }
 
-            write_state_to_eeprom(GS);
+            write_state_to_eeprom(global_state);
 
             return;
         }
 
         // LED ramp-up
-        const int current_step = curr_mins - GS.start_time_minutes;
+        const int current_step = curr_mins - global_state.start_time_minutes;
 
-        if (current_step == GS.last_step)
+        if (current_step == global_state.last_step)
         {
             return;
         }
 
-        const int steps_between = GS.ramp_up_duration_minutes;
+        const int steps_between = global_state.ramp_up_duration_minutes;
 
         digitalWrite(RELAY, LOW);
         digitalWrite(RELAY2, LOW);
@@ -592,7 +590,7 @@ void loop()
             analogWrite(LOW2, (float) (current_step - step_interval) / step_interval * 255);
         }
 
-        GS.last_step = current_step;
+        global_state.last_step = current_step;
     }
 }
 
@@ -699,10 +697,10 @@ bool in_menu(State state)
            || state_is(state, ClockState::VARIABLE_SELECTION);
 }
 
-void read_buttons(State& GS) 
+void read_buttons(State& global_state) 
 {
     for (int i = 0; i < BTN_COUNT; i++)
     {
-        GS.curr_button_state[i] = digitalRead(buttons[i]);
+        global_state.curr_button_state[i] = digitalRead(buttons[i]);
     }
 }
