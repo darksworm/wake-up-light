@@ -33,7 +33,6 @@ enum class ClockState
     CHANGING_VARIABLE
 };
 
-
 enum class ClockVariable
 {
     DISABLE_CLOCK,
