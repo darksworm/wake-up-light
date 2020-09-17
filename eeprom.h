@@ -3,68 +3,65 @@
 
 EEPROMState eeprom_state;
 
-const int eeprom_addrs[] = {
-    ENABLED_ADDR,
-    START_MINUTES_ADDR,
-    RAMP_UP_DURATION_MINUTES_ADDR,
-    END_MINUTES_ADDR
-};
+#define COMMA ,
+#define DECL_STATEVARS(var_name, state_var_name)  \
+    int* var_name[] = { \
+        STORABLE_STATE_VARIABLES(&state_var_name.,COMMA)\
+    };
 
-int* eeprom_state_variables[] = {
-    &eeprom_state.clock_enabled,
-    &eeprom_state.start_time_minutes,
-    &eeprom_state.ramp_up_duration_minutes,
-    &eeprom_state.end_time_minutes
-};
+#define DECL_VARS \
+    DECL_STATEVARS(state_variables, state); \
+    DECL_STATEVARS(eeprom_state_variables, eeprom_state); \
+    static_assert(sizeof(state_variables) == sizeof(eeprom_state_variables), \
+            "State variable count doesnt match eeprom state variable count"); \
+    static_assert(sizeof(eeprom_default_state_vals) / sizeof(int) == \
+            sizeof(eeprom_state_variables) / sizeof(int*), \
+            "eeporom state var count doesn't match default value count")
 
 int eeprom_default_state_vals[] = { 
-    1,     // enabled
-    7 * 6, // start at 7AM (minutes/10)
-    6,     // ramp for 1hr (minutes/10)
-    9 * 6  // end at 9AM (minutes/10)
+    1,      // clock enabled
+    7 * 60, // start at 7AM (minutes/10)
+    60,     // ramp for 1hr (minutes/10)
+    9 * 60, // end at 9AM (minutes/10)
+    0,      // no auto adjustment
+    7 * 60, // target start time same as start time
+    8       // adjusted on non-existant day
 };
 
-static_assert(sizeof(eeprom_addrs) / sizeof(const int) == 
-        sizeof(eeprom_state_variables) / sizeof(int*));
-
-static_assert(sizeof(eeprom_default_state_vals) / sizeof(int) ==
-        sizeof(eeprom_state_variables) / sizeof(int*));
-
-
+// TODO: clean these up
 void read_state_from_eeprom(State& state) 
 {
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        *eeprom_state_variables[i] = EEPROM.read(eeprom_addrs[i]);
-    }
+    EEPROM.get(STATE_ADDR, eeprom_state);
+    DECL_VARS;
 
-    state.start_time_minutes = eeprom_state.start_time_minutes * 10;
-    state.ramp_up_duration_minutes = eeprom_state.ramp_up_duration_minutes * 10;
-    state.end_time_minutes = eeprom_state.end_time_minutes * 10;
-    state.clock_is_disabled = !eeprom_state.clock_enabled;
+    for (int i = 0; i < sizeof(state_variables) / sizeof(int*); i++) {
+        *state_variables[i] = *eeprom_state_variables[i];
+    }
 }
 
 void write_state_to_eeprom(State state)
 {
-    eeprom_state.start_time_minutes = state.start_time_minutes / 10;
-    eeprom_state.ramp_up_duration_minutes = state.ramp_up_duration_minutes / 10;
-    eeprom_state.end_time_minutes = state.end_time_minutes / 10;
-    eeprom_state.clock_enabled = !state.clock_is_disabled;
-
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        EEPROM.write(eeprom_addrs[i], *eeprom_state_variables[i]);
+    DECL_VARS;
+    
+    for (int i = 0; i < sizeof(state_variables) / sizeof(int*); i++) {
+        *eeprom_state_variables[i] = *state_variables[i];
     }
+
+    EEPROM.put(STATE_ADDR, eeprom_state);
 }
 
 void initialize_default_state_to_eeprom()
 {
-    for (int i = 0; i < sizeof(eeprom_addrs) / sizeof(int); i++) {
-        EEPROM.write(eeprom_addrs[i], eeprom_default_state_vals[i]);
+    DECL_STATEVARS(eeprom_state_variables, eeprom_state);
+
+    for (int i = 0; i < sizeof(eeprom_state_variables) / sizeof(int); i++) {
+        *eeprom_state_variables[i] = eeprom_default_state_vals[i];
     }
 
-    EEPROM.write(EEPROM.length() - 1, MAGIC_NUMBER);
+    EEPROM.put(STATE_ADDR, eeprom_state);
 }
 
 bool eeprom_is_initialized()
 {
-    return EEPROM.read(EEPROM.length() - 1) == MAGIC_NUMBER;
+    return EEPROM.read(MAGIC_NUMBER_ADDR) == MAGIC_NUMBER;
 }

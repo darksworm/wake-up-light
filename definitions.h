@@ -21,12 +21,9 @@
 
 #define DEBOUNCE_DELAY 200
 
-#define ENABLED_ADDR 0
-#define START_MINUTES_ADDR 1
-#define RAMP_UP_DURATION_MINUTES_ADDR 2
-#define END_MINUTES_ADDR 3
-
-#define MAGIC_NUMBER 137
+#define MAGIC_NUMBER_ADDR 0
+#define MAGIC_NUMBER 99
+#define STATE_ADDR 1
 
 enum class ClockState
 {
@@ -36,12 +33,15 @@ enum class ClockState
     CHANGING_VARIABLE
 };
 
+
 enum class ClockVariable
 {
     DISABLE_CLOCK,
     START_TIME,
     RAMP_UP_TIME,
-    END_TIME
+    END_TIME,
+    TARGET_START_TIME,
+    AUTO_ADJUST_DURATION
 };
 
 enum Button
@@ -51,6 +51,22 @@ enum Button
     WHITE = 2,
     GREEN = 3
 };
+
+#define STORABLE_STATE_VARIABLES(prefix, suffix) \
+    /* when the lights should start ramping up in minutes (7:20 AM = 7 * 60 + 20)*/ \
+    prefix start_time_minutes suffix \
+    /* for how long the lights should be ramping up to 100% for in minutes */ \
+    prefix ramp_up_duration_minutes suffix \
+    /* when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20) */ \
+    prefix end_time_minutes suffix \
+    /* whether to disable the lights clock */ \
+    prefix clock_is_disabled suffix \
+    /* daily start time adjustment in minutes */ \
+    prefix auto_adjust_duration_daily_minutes suffix \
+    /* what start time we should be adjusting towards */ \
+    prefix target_start_time_minutes suffix \
+    /* on which day the last adjustment took place */ \
+    prefix last_adjustment_day suffix
 
 struct State
 {
@@ -75,14 +91,7 @@ struct State
 
     int last_blink_start = 0;
 
-    // when the lights should start ramping up in minutes (7:20 AM = 7 * 60 + 20)
-    int start_time_minutes;
-    // for how long the lights should be ramping up to 100% for in minutes
-    int ramp_up_duration_minutes;
-    // when the lights should turn off in minutes (7:20 AM = 7 * 60 + 20)
-    int end_time_minutes;
-    // whether to disable the lights clock
-    int clock_is_disabled;
+    STORABLE_STATE_VARIABLES(int,;);
 
     bool approving_invalid_val = false;
 
@@ -91,16 +100,10 @@ struct State
 };
 
 // Indermediary state variable representation in the EEPROM
-// This is a separate struct, because the data is stored differently
-// in the EEPROM than used in the state.
+// This is a separate struct, because not all of the state needs to be stored.
 struct EEPROMState
 {
-    // minutes are stored in the EEPROM divided by 10, so that one days minutes
-    // fit in to a single byte. (1440 mins = 144, which is < 255)
-    int start_time_minutes;
-    int ramp_up_duration_minutes;
-    int end_time_minutes;
-    int clock_enabled;
+    STORABLE_STATE_VARIABLES(int,;);
 };
 
 struct MenuItem
