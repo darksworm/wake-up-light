@@ -22,7 +22,7 @@
 #define DEBOUNCE_DELAY 200
 
 #define MAGIC_NUMBER_ADDR 0
-#define MAGIC_NUMBER 99
+#define MAGIC_NUMBER 206
 #define STATE_ADDR 1
 
 enum class ClockState
@@ -97,13 +97,6 @@ struct State
 
     String lcd_top_line;
     String lcd_bottom_line;
-};
-
-// Indermediary state variable representation in the EEPROM
-// This is a separate struct, because not all of the state needs to be stored.
-struct EEPROMState
-{
-    STORABLE_STATE_VARIABLES(int,;);
 };
 
 struct MenuItem
