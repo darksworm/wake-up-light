@@ -21,7 +21,7 @@ ClockVariable next_variable(State);
 ClockVariable prev_variable(State);
 
 bool state_is(State, ClockState);
-void read_buttons(State&); 
+void read_buttons(State&);
 
 State global_state;
 RTC_DS3231 rtc;
@@ -182,7 +182,7 @@ MenuItem menu_items[] = {
         [](MenuItem *i)
         {
             auto text = minutes_to_duration(i->menu_value);
-            return text == "instant" ? "none" : text;
+            return text == "instant" ? "OFF" : text;
         },
 
         [](MenuItem *i)
@@ -378,7 +378,7 @@ void loop()
 
                     global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
                     global_state.approving_invalid_val = false;
-                } 
+                }
                 else
                 {
                     global_state.approving_invalid_val = true;
@@ -443,18 +443,39 @@ void loop()
     if (in_menu(global_state))
     {
         String top_line = menu_item->variable_str,
-            bottom_line = menu_item->variable_val_str(menu_item);
+            bottom_line = menu_item->variable_val_str(menu_item),
+            pos_line = "";
+
+        {
+            int menu_pos = (int)global_state.current_clock_variable + 1;
+            int hidden_items = global_state.auto_adjust_duration_daily_minutes == 0;
+
+            int total_items = MENU_ITEM_COUNT - hidden_items;
+            if (menu_pos > total_items) {
+                menu_pos = total_items;
+            }
+            String pos_indicator = String(menu_pos) + "/" + String(total_items);
+
+            int padding_size = 16 - 1 - bottom_line.length() - pos_indicator.length();
+
+            for (int i = 1; i < padding_size; i++)
+            {
+                pos_line += " ";
+            }
+
+            pos_line += pos_indicator;
+        }
 
         if (state_is(global_state, ClockState::VARIABLE_SELECTION))
         {
-            write_lcd(global_state, top_line, "> " + bottom_line);
+            write_lcd(global_state, top_line, "> " + bottom_line + pos_line);
         }
         else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
         {
-            if (global_state.approving_invalid_val) 
+            if (global_state.approving_invalid_val)
             {
                 write_lcd(global_state, "Invalid value!", "Save anyway?");
-            } 
+            }
             else
             {
                 // don't blink while pressing buttons
@@ -477,14 +498,14 @@ void loop()
     }
     else
     {
-        String top_text = "Now: " + left_pad(now.hour()) + ":" 
+        String top_text = "Now: " + left_pad(now.hour()) + ":"
             + left_pad(now.minute()) + ":" + left_pad(now.second());
 
         String bottom_text = "";
 
         for (int i = 0; i < MENU_ITEM_COUNT; i++)
         {
-            if (!menu_items[i].is_valid(&menu_items[i], global_state)) 
+            if (!menu_items[i].is_valid(&menu_items[i], global_state))
             {
                 bottom_text = "Bad settings!";
                 break;
@@ -494,7 +515,7 @@ void loop()
         if (bottom_text == "")
         {
             bottom_text = global_state.clock_is_disabled ?
-                "Alarm disabled" : 
+                "Alarm disabled" :
                 "Alarm: " + minutes_to_time(global_state.start_time_minutes);
         }
 
@@ -523,14 +544,14 @@ void loop()
     }
     else
     {
-        bool should_adjust_time = 
+        bool should_adjust_time =
             global_state.last_adjustment_day != now.day() &&
-            global_state.auto_adjust_duration_daily_minutes > 0 && 
+            global_state.auto_adjust_duration_daily_minutes > 0 &&
             global_state.target_start_time_minutes != global_state.start_time_minutes;
 
-        if (should_adjust_time) 
+        if (should_adjust_time)
         {
-            int multiplier = 
+            int multiplier =
                 global_state.target_start_time_minutes > global_state.start_time_minutes ? 1 : -1;
 
             int adjustment = multiplier * global_state.auto_adjust_duration_daily_minutes;
@@ -540,7 +561,7 @@ void loop()
                 if (1 == multiplier && adjusted_start > global_state.target_start_time_minutes)
                 {
                     adjustment = global_state.target_start_time_minutes - global_state.start_time_minutes;
-                } 
+                }
                 else if (-1 == multiplier && adjusted_start < global_state.target_start_time_minutes)
                 {
                     adjustment = global_state.target_start_time_minutes - global_state.start_time_minutes;
@@ -653,7 +674,14 @@ ClockVariable next_variable(State state)
     int current_index = (int) state.current_clock_variable;
     int result = current_index + 1;
 
-    if (result == MENU_ITEM_COUNT)
+    // skip target start time if auto adjust set to zero
+    if (state.auto_adjust_duration_daily_minutes == 0
+            && result == (int)ClockVariable::TARGET_START_TIME)
+    {
+        result += 1;
+    }
+
+    if (result >= MENU_ITEM_COUNT)
     {
         result = 0;
     }
@@ -669,6 +697,14 @@ ClockVariable prev_variable(State state)
     if (result < 0)
     {
         result = MENU_ITEM_COUNT - 1;
+    }
+
+    // NOTE: this will break if TARGET_START_TIME is put in the 0th position
+    // skip target start time if auto adjust set to zero
+    if (state.auto_adjust_duration_daily_minutes == 0
+            && result == (int)ClockVariable::TARGET_START_TIME)
+    {
+        result -= 1;
     }
 
     return (ClockVariable) result;
@@ -698,7 +734,7 @@ bool in_menu(State state)
            || state_is(state, ClockState::VARIABLE_SELECTION);
 }
 
-void read_buttons(State& global_state) 
+void read_buttons(State& global_state)
 {
     for (int i = 0; i < BTN_COUNT; i++)
     {

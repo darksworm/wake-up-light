@@ -39,8 +39,8 @@ enum class ClockVariable
     START_TIME,
     RAMP_UP_TIME,
     END_TIME,
+    AUTO_ADJUST_DURATION,
     TARGET_START_TIME,
-    AUTO_ADJUST_DURATION
 };
 
 enum Button
