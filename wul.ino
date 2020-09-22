@@ -1,5 +1,5 @@
 #include <Wire.h>
-#include <LiquidCrystal.h>
+#include <LiquidCrystal_I2C.h>
 #include "RTClib.h"
 #include "definitions.h"
 #include "formatting.h"
@@ -25,7 +25,7 @@ void read_buttons(State&);
 
 State global_state;
 RTC_DS3231 rtc;
-LiquidCrystal lcd(LCD_RS, LCD_ENABLE, LCD_D4, LCD_D5, LCD_D6, LCD_D7);
+LiquidCrystal_I2C lcd(0x27, 20, 4);
 
 MenuItem menu_items[] = {
     {
@@ -291,7 +291,7 @@ void setup()
     if (!rtc.begin())
     {
         turn_on_lcd();
-        lcd.write("RTC can't even!");
+        lcd.print("RTC can't even!");
 
         while (1);
     }
@@ -299,7 +299,7 @@ void setup()
     if (rtc.lostPower())
     {
         turn_on_lcd();
-        lcd.write("RTC lost power!");
+        lcd.print("RTC lost power!");
         // todo: set time here
 
         while (1);
@@ -628,11 +628,13 @@ void turn_all_lights_on()
 
 void turn_on_lcd()
 {
+    lcd.backlight();
     digitalWrite(LCD_BACKLIGHT, HIGH);
 }
 
 void turn_off_lcd()
 {
+    lcd.noBacklight();
     digitalWrite(LCD_BACKLIGHT, LOW);
 }
 
