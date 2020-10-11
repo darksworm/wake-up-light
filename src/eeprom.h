@@ -1,5 +1,5 @@
 #include <EEPROM.h>
-#include "definitions.h"
+#include "wul.h"
 
 #define COMMA ,
 #define DECL_VARS \
@@ -12,7 +12,7 @@
 
 #define STATE_SIZE sizeof(eeprom_default_state_vals) / sizeof(int)
 
-void read_state_from_eeprom(State& state) 
+void read_state_from_eeprom(State& state)
 {
     DECL_VARS;
     int read_state[STATE_SIZE];
@@ -28,7 +28,7 @@ void write_state_to_eeprom(State state)
 {
     DECL_VARS;
     int writable_state[STATE_SIZE];
-    
+
     for (int i = 0; i < STATE_SIZE; i++) {
         writable_state[i] = *state_variables[i];
     }

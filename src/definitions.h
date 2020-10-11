@@ -19,7 +19,7 @@
 #define LOW2 6
 #define LOW1 5
 
-#define DEBOUNCE_DELAY 200
+#define DEBOUNCE_DELAY 150
 
 #define MAGIC_NUMBER_ADDR 0
 #define MAGIC_NUMBER 137
@@ -43,12 +43,12 @@ enum class ClockVariable
     TARGET_START_TIME,
 };
 
-enum Button
+enum class ButtonColor
 {
-    BLUE = 0,
-    RED = 1,
-    WHITE = 2,
-    GREEN = 3
+    BLUE,
+    RED,
+    WHITE,
+    GREEN
 };
 
 #define STORABLE_STATE_VARIABLES(prefix, suffix) \
@@ -67,14 +67,14 @@ enum Button
     /* on which day the last adjustment took place */ \
     prefix last_adjustment_day suffix
 
-int eeprom_default_state_vals[] = { 
+int eeprom_default_state_vals[] = {
     7 * 60 + 30, // start at 7:30AM
     30,          // ramp for 30min
-    8 * 60 + 30, // end at 8:30AM 
+    8 * 60 + 30, // end at 8:30AM
     0,           // clock enabled
     0,           // no auto adjustment
     7 * 60 + 30, // target start time same as start time
-    32            // adjust on non-existant day
+    32           // adjust on non-existant day
 };
 
 struct State
@@ -95,10 +95,13 @@ struct State
     int prev_button_state[BTN_COUNT] = {0, 0, 0, 0};
     // current button states
     int curr_button_state[BTN_COUNT] = {0, 0, 0, 0};
-    // when the last debounce happened in ms (used for debounce timer)
-    int last_debounce_start = 0;
+    // next time when the button should activate
+    unsigned long button_next_repeat_millis[BTN_COUNT] = {0, 0, 0, 0};
 
-    int last_blink_start = 0;
+    // when the last debounce happened in ms (used for debounce timer)
+    unsigned long last_debounce_start = 0;
+
+    unsigned long last_blink_start = 0;
 
     STORABLE_STATE_VARIABLES(int,;);
 
@@ -121,5 +124,17 @@ struct MenuItem
     void (*increment)(MenuItem *);
     void (*decrement)(MenuItem *);
     bool (*is_valid)(MenuItem *, State&);
+};
+
+struct Button
+{
+    ButtonColor color;
+    int pin;
+
+    bool should_debounce;
+    bool allow_repeat;
+
+    int (*get_repeat_offset_millis)(State&);
+    void (*activate)(State&, MenuItem*, bool);
 };
 

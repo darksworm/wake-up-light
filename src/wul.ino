@@ -13,15 +13,16 @@ void clear_lcd(State &);
 void turn_all_lights_on();
 void turn_all_lights_off(State &);
 
-bool button_changed_to(int, int);
+bool button_changed_to(const State&, int, int);
+bool button_ready_to_repeat(const State&, int, unsigned long);
 
 void reset_menu_item_vals();
-MenuItem *current_menu_item(State);
-ClockVariable next_variable(State);
-ClockVariable prev_variable(State);
+MenuItem *current_menu_item(const State&);
+ClockVariable next_variable(const State&);
+ClockVariable prev_variable(const State&);
 
-bool state_is(State, ClockState);
-void read_buttons(State&);
+bool state_is(const State&, ClockState);
+void read_button_pins(State&);
 
 State global_state;
 RTC_DS3231 rtc;
@@ -255,12 +256,159 @@ MenuItem menu_items[] = {
 
 #define MENU_ITEM_COUNT sizeof(menu_items) / sizeof(MenuItem)
 
-const int buttons[] = {BTN_BLUE, BTN_RED, BTN_WHITE, BTN_GREEN};
+Button buttons[] = {
+    {
+        ButtonColor::BLUE,
+        BTN_BLUE,
+        true,
+        true,
+        [](State& s)
+        {
+            if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                return 600;
+            }
+
+            return 200;
+        },
+        [](State& s, MenuItem* i, bool is_in_timeframe)
+        {
+            if (is_in_timeframe && state_is(s, ClockState::ACTIVE_TIMER))
+            {
+                DateTime now = rtc.now();
+                s.skip_day = s.skip_day == now.day() ? -1 : now.day();
+            }
+            else if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                s.current_clock_variable = prev_variable(s);
+            }
+            else if (state_is(s, ClockState::CHANGING_VARIABLE))
+            {
+                i->decrement(i);
+            }
+        }
+    },
+    {
+        ButtonColor::RED,
+        BTN_RED,
+        true,
+        true,
+        [](State& s)
+        {
+            if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                return 600;
+            }
+
+            return 200;
+        },
+        [](State& s, MenuItem* i, bool is_in_timeframe)
+        {
+            if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                s.current_clock_variable = next_variable(s);
+            }
+            else if (state_is(s, ClockState::CHANGING_VARIABLE))
+            {
+                i->increment(i);
+            }
+            else if (!state_is(s, ClockState::LIGHTS_ON))
+            {
+                s.current_clock_state = ClockState::LIGHTS_ON;
+            }
+            else
+            {
+                s.current_clock_state = ClockState::ACTIVE_TIMER;
+            }
+        }
+    },
+    {
+        ButtonColor::WHITE,
+        BTN_WHITE,
+        false,
+        false,
+        [](State& s)
+        {
+            return 0;
+        },
+        [](State& s, MenuItem* i, bool is_in_timeframe)
+        {
+            if (state_is(s, ClockState::CHANGING_VARIABLE))
+            {
+                bool is_valid = i->is_valid(i, s);
+
+                if (is_valid || s.approving_invalid_val) {
+                    *i->value_in_state = i->menu_value;
+                    write_state_to_eeprom(s);
+
+                    s.current_clock_state = ClockState::VARIABLE_SELECTION;
+                    s.approving_invalid_val = false;
+                }
+                else
+                {
+                    s.approving_invalid_val = true;
+                }
+            }
+            else if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                s.current_clock_state = ClockState::CHANGING_VARIABLE;
+            }
+            else
+            {
+                s.current_clock_state = ClockState::VARIABLE_SELECTION;
+                reset_menu_item_vals();
+            }
+        }
+    },
+    {
+        ButtonColor::GREEN,
+        BTN_GREEN,
+        true,
+        false,
+        [](State& s)
+        {
+            return 0;
+        },
+        [](State& s, MenuItem* i, bool is_in_timeframe)
+        {
+            if (state_is(s, ClockState::CHANGING_VARIABLE))
+            {
+                if (!s.approving_invalid_val)
+                {
+                    s.current_clock_state = ClockState::VARIABLE_SELECTION;
+                }
+
+                s.approving_invalid_val = false;
+                reset_menu_item_vals();
+            }
+            else if (state_is(s, ClockState::VARIABLE_SELECTION))
+            {
+                s.current_clock_state = ClockState::ACTIVE_TIMER;
+                s.current_clock_variable = ClockVariable::DISABLE_CLOCK;
+
+                clear_lcd(s);
+                turn_off_lcd();
+            }
+            else
+            {
+                if (digitalRead(LCD_BACKLIGHT))
+                {
+                    turn_off_lcd();
+                }
+                else
+                {
+                    turn_on_lcd();
+                }
+            }
+        }
+    },
+};
+
+static_assert(sizeof(buttons) / sizeof(Button) == BTN_COUNT);
 
 void setup()
 {
     lcd.begin(16, 2);
-    Serial.begin(9600);
 
     if (!eeprom_is_initialized())
     {
@@ -275,7 +423,7 @@ void setup()
 
     for (int i = 0; i < BTN_COUNT; i++)
     {
-        pinMode(buttons[i], INPUT);
+        pinMode(button[i].pin, INPUT);
     }
 
     for (int i = 0; i < sizeof(outputs) / sizeof(int); i++)
@@ -311,8 +459,21 @@ void loop()
     auto menu_item = current_menu_item(global_state);
 
     DateTime now = rtc.now();
-    const unsigned int ms = millis();
+    const unsigned long ms = millis();
     const unsigned curr_mins = now.hour() * 60 + now.minute();
+
+    // avoid millis overflow issues by resetting millis based state variables
+    // this won't fire on the first run due to setup taking ~1000ms
+    if (ms <= 100)
+    {
+        for(int i = 0; i < BTN_COUNT; i++)
+        {
+            global_state.button_next_repeat_millis[i] = 0;
+        }
+
+        global_state.last_debounce_start = 0;
+        global_state.last_blink_start = 0;
+    }
 
     bool is_in_timeframe =
         curr_mins >= global_state.start_time_minutes
@@ -324,106 +485,42 @@ void loop()
     if ((ms - global_state.last_debounce_start) > DEBOUNCE_DELAY)
     {
         bool debounce = false;
-        read_buttons(global_state);
+        read_button_pins(global_state);
 
-        if (button_changed_to(global_state, Button::BLUE, HIGH))
+        for(int i = 0; i < BTN_COUNT; i++)
         {
-            if (is_in_timeframe && state_is(global_state, ClockState::ACTIVE_TIMER))
-            {
-                global_state.skip_day = global_state.skip_day == now.day() ? -1 : now.day();
-            }
-            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
-            {
-                global_state.current_clock_variable = prev_variable(global_state);
-            }
-            else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
-            {
-                menu_item->decrement(menu_item);
-            }
+            Button button = buttons[i];
+            bool btn_changed = button_changed_to(global_state, (int)button.color, HIGH);
+            bool btn_should_activate = btn_changed
+                || (button.allow_repeat && button_ready_to_repeat(global_state, (int)button.color, ms));
 
-            debounce = true;
-        }
-
-        if (button_changed_to(global_state, Button::RED, HIGH))
-        {
-            if (state_is(global_state, ClockState::VARIABLE_SELECTION))
+            if(button.allow_repeat)
             {
-                global_state.current_clock_variable = next_variable(global_state);
-            }
-            else if (state_is(global_state, ClockState::CHANGING_VARIABLE))
-            {
-                menu_item->increment(menu_item);
-            }
-            else if (!state_is(global_state, ClockState::LIGHTS_ON))
-            {
-                global_state.current_clock_state = ClockState::LIGHTS_ON;
-            }
-            else
-            {
-                global_state.current_clock_state = ClockState::ACTIVE_TIMER;
-            }
-
-            debounce = true;
-        }
-
-        if (button_changed_to(global_state, Button::WHITE, HIGH))
-        {
-            if (state_is(global_state, ClockState::CHANGING_VARIABLE))
-            {
-                bool is_valid = menu_item->is_valid(menu_item, global_state);
-
-                if (is_valid || global_state.approving_invalid_val) {
-                    *menu_item->value_in_state = menu_item->menu_value;
-                    write_state_to_eeprom(global_state);
-
-                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
-                    global_state.approving_invalid_val = false;
-                }
-                else
+                if (global_state.curr_button_state[(int)button.color] == HIGH)
                 {
-                    global_state.approving_invalid_val = true;
+                    if (btn_changed)
+                    {
+                        global_state.button_next_repeat_millis[i] = ms + 900;
+                    }
+                    else if (btn_should_activate)
+                    {
+                        global_state.button_next_repeat_millis[i] = ms + button.get_repeat_offset_millis(global_state);
+                        debounce = true;
+                    }
+                }
+                else if(button_changed_to(global_state, (int)button.color, LOW))
+                {
+                    global_state.button_next_repeat_millis[i] = 0;
                 }
             }
-            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
-            {
-                global_state.current_clock_state = ClockState::CHANGING_VARIABLE;
-            }
-            else
-            {
-                global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
-                reset_menu_item_vals();
-            }
-        }
 
-        if (button_changed_to(global_state, Button::GREEN, HIGH))
-        {
-            if (state_is(global_state, ClockState::CHANGING_VARIABLE))
+            if(btn_should_activate)
             {
-                if (!global_state.approving_invalid_val)
-                {
-                    global_state.current_clock_state = ClockState::VARIABLE_SELECTION;
-                }
+                button.activate(global_state, menu_item, is_in_timeframe);
 
-                global_state.approving_invalid_val = false;
-                reset_menu_item_vals();
-            }
-            else if (state_is(global_state, ClockState::VARIABLE_SELECTION))
-            {
-                global_state.current_clock_state = ClockState::ACTIVE_TIMER;
-                global_state.current_clock_variable = ClockVariable::DISABLE_CLOCK;
-
-                clear_lcd(global_state);
-                turn_off_lcd();
-            }
-            else
-            {
-                if (digitalRead(LCD_BACKLIGHT))
+                if (button.should_debounce)
                 {
-                    turn_off_lcd();
-                }
-                else
-                {
-                    turn_on_lcd();
+                    debounce = true;
                 }
             }
         }
@@ -665,13 +762,20 @@ void clear_lcd(State &state)
     state.lcd_bottom_line = "";
 }
 
-bool button_changed_to(State state, int btn, int val)
+bool button_changed_to(const State& state, int btn, int val)
 {
     return state.prev_button_state[btn] != state.curr_button_state[btn]
            && state.curr_button_state[btn] == val;
 }
 
-ClockVariable next_variable(State state)
+bool button_ready_to_repeat(const State& state, int btn, unsigned long ms_now)
+{
+    return state.curr_button_state[btn]
+        && state.button_next_repeat_millis[btn]
+        && state.button_next_repeat_millis[btn] <= ms_now;
+}
+
+ClockVariable next_variable(const State& state)
 {
     int current_index = (int) state.current_clock_variable;
     int result = current_index + 1;
@@ -691,7 +795,7 @@ ClockVariable next_variable(State state)
     return (ClockVariable) result;
 }
 
-ClockVariable prev_variable(State state)
+ClockVariable prev_variable(const State& state)
 {
     int current_index = (int) state.current_clock_variable;
     int result = current_index - 1;
@@ -720,12 +824,12 @@ void reset_menu_item_vals()
     }
 }
 
-MenuItem *current_menu_item(State state)
+MenuItem *current_menu_item(const State& state)
 {
     return &menu_items[(int) state.current_clock_variable];
 }
 
-bool state_is(State state, ClockState cs)
+bool state_is(const State& state, ClockState cs)
 {
     return cs == state.current_clock_state;
 }
@@ -736,10 +840,11 @@ bool in_menu(State state)
            || state_is(state, ClockState::VARIABLE_SELECTION);
 }
 
-void read_buttons(State& global_state)
+void read_button_pins(State& global_state)
 {
     for (int i = 0; i < BTN_COUNT; i++)
     {
-        global_state.curr_button_state[i] = digitalRead(buttons[i]);
+        global_state.curr_button_state[i] = digitalRead(buttons[i].pin);
     }
 }
+
