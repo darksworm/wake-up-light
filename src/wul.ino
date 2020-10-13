@@ -256,7 +256,7 @@ MenuItem menu_items[] = {
 
 #define MENU_ITEM_COUNT sizeof(menu_items) / sizeof(MenuItem)
 
-Button buttons[] = {
+const Button buttons[] = {
     {
         ButtonColor::BLUE,
         BTN_BLUE,
@@ -264,12 +264,7 @@ Button buttons[] = {
         true,
         [](State& s)
         {
-            if (state_is(s, ClockState::VARIABLE_SELECTION))
-            {
-                return 600;
-            }
-
-            return 200;
+            return state_is(s, ClockState::VARIABLE_SELECTION) ? 600 : 200;
         },
         [](State& s, MenuItem* i, bool is_in_timeframe)
         {
@@ -295,12 +290,7 @@ Button buttons[] = {
         true,
         [](State& s)
         {
-            if (state_is(s, ClockState::VARIABLE_SELECTION))
-            {
-                return 600;
-            }
-
-            return 200;
+            return state_is(s, ClockState::VARIABLE_SELECTION) ? 600 : 200;
         },
         [](State& s, MenuItem* i, bool is_in_timeframe)
         {
@@ -337,7 +327,8 @@ Button buttons[] = {
             {
                 bool is_valid = i->is_valid(i, s);
 
-                if (is_valid || s.approving_invalid_val) {
+                if (is_valid || s.approving_invalid_val)
+                {
                     *i->value_in_state = i->menu_value;
                     write_state_to_eeprom(s);
 
@@ -487,15 +478,16 @@ void loop()
         bool debounce = false;
         read_button_pins(global_state);
 
-        for(int i = 0; i < BTN_COUNT; i++)
+        for (int i = 0; i < BTN_COUNT; i++)
         {
             Button button = buttons[i];
             bool btn_changed = button_changed_to(global_state, (int)button.color, HIGH);
-            bool btn_should_activate = btn_changed
-                || (button.allow_repeat && button_ready_to_repeat(global_state, (int)button.color, ms));
 
-            if(button.allow_repeat)
+            if (button.allow_repeat)
             {
+                bool btn_should_activate = btn_changed
+                    || (button.allow_repeat && button_ready_to_repeat(global_state, (int)button.color, ms));
+
                 if (global_state.curr_button_state[(int)button.color] == HIGH)
                 {
                     if (btn_changed)
@@ -508,13 +500,13 @@ void loop()
                         debounce = true;
                     }
                 }
-                else if(button_changed_to(global_state, (int)button.color, LOW))
+                else if (button_changed_to(global_state, (int)button.color, LOW))
                 {
                     global_state.button_next_repeat_millis[i] = 0;
                 }
             }
 
-            if(btn_should_activate)
+            if (btn_should_activate)
             {
                 button.activate(global_state, menu_item, is_in_timeframe);
 
