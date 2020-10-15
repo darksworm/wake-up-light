@@ -414,7 +414,7 @@ void setup()
 
     for (int i = 0; i < BTN_COUNT; i++)
     {
-        pinMode(button[i].pin, INPUT);
+        pinMode(buttons[i].pin, INPUT);
     }
 
     for (int i = 0; i < sizeof(outputs) / sizeof(int); i++)
@@ -482,12 +482,11 @@ void loop()
         {
             Button button = buttons[i];
             bool btn_changed = button_changed_to(global_state, (int)button.color, HIGH);
+            bool btn_should_activate = btn_changed
+                || (button.allow_repeat && button_ready_to_repeat(global_state, (int)button.color, ms));
 
             if (button.allow_repeat)
             {
-                bool btn_should_activate = btn_changed
-                    || (button.allow_repeat && button_ready_to_repeat(global_state, (int)button.color, ms));
-
                 if (global_state.curr_button_state[(int)button.color] == HIGH)
                 {
                     if (btn_changed)

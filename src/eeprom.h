@@ -1,5 +1,5 @@
 #include <EEPROM.h>
-#include "wul.h"
+#include "definitions.h"
 
 #define COMMA ,
 #define DECL_VARS \
