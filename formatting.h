@@ -7,12 +7,14 @@ String minutes_to_time(int mins)
     int hrs = mins / 60;
     int leftover_mins = mins - hrs * 60;
 
-    String result = String(hrs) + ":" + String(leftover_mins);
+    String mins_part = String(leftover_mins);
 
     if (leftover_mins < 10)
     {
-        result += "0";
+        mins_part = "0" + mins_part;
     }
+
+    String result = String(hrs) + ":" + mins_part;
 
     if (hrs < 10)
     {
