@@ -39,6 +39,7 @@ void write_state_to_eeprom(State state)
 void initialize_default_state_to_eeprom()
 {
     EEPROM.put(STATE_ADDR, eeprom_default_state_vals);
+    EEPROM.put(MAGIC_NUMBER_ADDR, MAGIC_NUMBER);
 }
 
 bool eeprom_is_initialized()

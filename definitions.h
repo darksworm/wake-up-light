@@ -23,7 +23,7 @@
 
 #define MAGIC_NUMBER_ADDR 0
 #define MAGIC_NUMBER 137
-#define STATE_ADDR 1
+#define STATE_ADDR 9
 
 enum class ClockState
 {
